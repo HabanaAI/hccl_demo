@@ -59,11 +59,17 @@ def read_settings():
     global num_processes
     num_processes = min(test_params["ranks_per_node"], test_params["nranks"])
 
+def is_dev():
+    if 'SYNAPSE_RELEASE_BUILD' in os.environ:
+        return True
+    else:
+        return False
+
 def handle_make(isClean=False):
     make_cmd = 'make'
     if isClean:
         make_cmd += ' clean'
-    elif 'SYNAPSE_RELEASE_BUILD' in os.environ:
+    elif is_dev():
         print_log('Detected dev environment!')
         make_cmd += ' dev'
     run_process(make_cmd)
@@ -105,6 +111,12 @@ def parse_size(size):
             unit_size = 1
         return str(int(number*unit_size))
     return size
+
+def handle_affinity():
+    if is_dev():
+        if 'AFFINITY_ENABLED' in os.environ and int(os.environ['AFFINITY_ENABLED']):
+            from affinity import create_affinity_files
+            create_affinity_files()
 
 def handle_args():
     parser = argparse.ArgumentParser(description="""Run HCL demo test""")
@@ -153,7 +165,7 @@ def handle_args():
         test_params["test"] = args.test
 
     if args.size:
-        test_params['size'] = parse_size(args.size)
+        test_params['size'] = parse_size(str(args.size))
 
     if args.loop:
         test_params['loop'] = args.loop
@@ -192,6 +204,7 @@ def main():
     print_log("Printing test params:")
     print_log(test_params)
     read_settings()
+    handle_affinity()
 
     # Create the test executable if not found
     if not os.path.exists(demo_exe):

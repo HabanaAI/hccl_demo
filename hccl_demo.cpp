@@ -30,6 +30,10 @@
 // Synapse :: Habana Synapse training API
 #include <synapse_api.h>
 
+#if AFFINITY_ENABLED
+#include "affinity.h"
+#endif
+
 #define DATA_ELEMENTS_MAX 13
 #define DEFAULT_TEST_SIZE 33554432
 #define DEFAULT_TEST_LOOP 10
@@ -359,6 +363,10 @@ int main()
         // Acquire device
         const synModuleId device_module_id = hccl_rank % get_demo_box_size();
         CHECK_SYNAPSE_STATUS(synDeviceAcquireByModuleId(&demo_data.device_handle, device_module_id));
+
+#if AFFINITY_ENABLED
+        setupAffinity(device_module_id);
+#endif
 
         // Create Streams
         CHECK_SYNAPSE_STATUS(
