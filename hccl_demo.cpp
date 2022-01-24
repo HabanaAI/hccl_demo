@@ -324,27 +324,16 @@ void describe_stat(const string&          stat_name,
 }
 
 hcclResult_t send_recv_test(
-    vector<void*> out_dev_ptrs, const void* input_dev_ptr, size_t count, hcclComm_t comm, hcclStream_t stream)
+    void* out_dev_ptr, const void* input_dev_ptr, size_t count, hcclComm_t comm, hcclStream_t stream, int peerRank)
 {
-    hcclResult_t status;
     hcclGroupStart();
-    for (int senderRank = 0; senderRank < get_nranks(); senderRank++)
-    {
-        if (get_hccl_rank() == senderRank)
-        {
-            for (int recvRank = 0; recvRank < get_nranks(); recvRank++)
-            {
-                if (recvRank == senderRank) continue;
-                status = hcclSend((const void*) input_dev_ptr, count, hcclFloat32, recvRank, comm, stream);
-            }
-        }
-        else
-        {
-            status = hcclRecv((void*) out_dev_ptrs[senderRank], count, hcclFloat32, senderRank, comm, stream);
-        }
-    }
+
+    CHECK_HCCL_STATUS(hcclSend((const void*) input_dev_ptr, count, hcclFloat32, peerRank, comm, stream));
+    CHECK_HCCL_STATUS(hcclRecv((void*) out_dev_ptr, count, hcclFloat32, peerRank, comm, stream));
+
     hcclGroupEnd();
-    return status;
+
+    return hcclSuccess;
 }
 
 int main()
@@ -761,26 +750,19 @@ int main()
         }
         else if (test_type == "send_recv")
         {
-            double send_recv_factor = demo_data.nranks - 1;
-            auto   out_dev_ptrs     = vector<void*> {};
-            out_dev_ptrs.reserve(demo_data.nranks);
-            uint64_t output_dev_ptr_temp {};
-            for (uint8_t rank = 0; rank < demo_data.nranks; rank++)
-            {
-                CHECK_SYNAPSE_STATUS(synDeviceMalloc(demo_data.device_handle, data_size, 0, 0, &output_dev_ptr_temp));
-                out_dev_ptrs.push_back(reinterpret_cast<void*>(output_dev_ptr_temp));
-            }
+            double send_recv_factor = 1;
+            int    peerRank         = get_hccl_rank() % 2 ? get_hccl_rank() - 1 : get_hccl_rank() + 1;
 
             auto stat = benchmark(demo_data, [&]() {
-                CHECK_HCCL_STATUS(send_recv_test(out_dev_ptrs,
+                CHECK_HCCL_STATUS(send_recv_test((void*) output_dev_ptr,
                                                  (const void*) input_dev_ptr,
                                                  (uint64_t) input_host_data.size(),
                                                  demo_data.hccl_comm,
-                                                 demo_data.collective_stream));
+                                                 demo_data.collective_stream,
+                                                 peerRank));
             });
 
             // Correctness check
-
             bool is_ok = true;
 
             auto        output_host_data     = vector<float>(input_host_data.size());
@@ -788,43 +770,33 @@ int main()
 
             CHECK_SYNAPSE_STATUS(synHostMap(demo_data.device_handle, data_size, output_host_data_ptr));
 
-            for (int senderRank = 0; (uint) senderRank < demo_data.nranks; senderRank++)
+            CHECK_SYNAPSE_STATUS(synMemCopyAsync(demo_data.device_to_host_stream,
+                                                 output_dev_ptr,
+                                                 data_size,
+                                                 (uint64_t) output_host_data_ptr,
+                                                 DRAM_TO_HOST));
+            CHECK_SYNAPSE_STATUS(synStreamSynchronize(demo_data.device_to_host_stream));
+
+            for (size_t i = 0; i < input_host_data.size(); ++i)
             {
-                if (hccl_rank == senderRank) continue;
-                CHECK_SYNAPSE_STATUS(synMemCopyAsync(demo_data.device_to_host_stream,
-                                                     (uint64_t)(out_dev_ptrs[senderRank]),
-                                                     data_size,
-                                                     (uint64_t) output_host_data_ptr,
-                                                     DRAM_TO_HOST));
-                CHECK_SYNAPSE_STATUS(synStreamSynchronize(demo_data.device_to_host_stream));
-
-                for (size_t i = 0; i < input_host_data.size(); ++i)
+                if (abs(output_host_data[i] - (float) (peerRank + 1)) != 0)
                 {
-                    if (abs(output_host_data[i] - (float) (senderRank + 1)) != 0)
-                    {
-                        is_ok = false;
-                    }
+                    is_ok = false;
                 }
-
-                log() << "SendRecv hccl_rank=" << hccl_rank << " senderRank=" << senderRank << " size=" << data_size
-                      << " <float>"
-                      << " Input Buffer [" << input_host_data[0] << " " << input_host_data[1] << " "
-                      << input_host_data[2] << " " << input_host_data[3] << " ...]"
-                      << " Output Buffer [" << output_host_data[0] << " " << output_host_data[1] << " "
-                      << output_host_data[2] << " " << output_host_data[3] << " ...]"
-                      << " which is " << (is_ok ? "fine." : "bad.") << endl;
             }
+
+            log() << "SendRecv hccl_rank=" << hccl_rank << " peerRank=" << peerRank << " size=" << data_size
+                  << " <float>"
+                  << " Input Buffer [" << input_host_data[0] << " " << input_host_data[1] << " " << input_host_data[2]
+                  << " " << input_host_data[3] << " ...]"
+                  << " Output Buffer [" << output_host_data[0] << " " << output_host_data[1] << " "
+                  << output_host_data[2] << " " << output_host_data[3] << " ...]"
+                  << " which is " << (is_ok ? "fine." : "bad.") << endl;
 
             CHECK_SYNAPSE_STATUS(synHostUnmap(demo_data.device_handle, input_host_data_ptr));
             CHECK_SYNAPSE_STATUS(synHostUnmap(demo_data.device_handle, output_host_data_ptr));
 
             // End of correctness check
-
-            for (auto out_dev_ptr : out_dev_ptrs)
-            {
-                CHECK_SYNAPSE_STATUS(
-                    synDeviceFree(demo_data.device_handle, reinterpret_cast<uint64_t>(out_dev_ptr), 0));
-            }
             describe_stat("hcclSendRecv(src!=dst, count=" + to_string(input_host_data.size()) +
                               ", dtype=fp32, iterations=" + to_string(demo_data.num_iters) + ")",
                           stat,
