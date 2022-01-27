@@ -14,6 +14,10 @@ Supported point to point communication:
 1. C++ project with all tests and makefile
 2. Python wrapper which builds and runs the tests on multiple processes according to the number of devices
 
+## Licensing
+Copyright (c) 2022 Habana Labs, Ltd.
+SPDX-License-Identifier: Apache-2.0
+
 ## Build
 Building and cleaning of the project is handled by the Python wrapper.
 Alternatively, it can also be built by running the 'make' command.
