@@ -1,13 +1,6 @@
 /******************************************************************************
- * Copyright (C) 2021 Habana Labs, Ltd. an Intel Company
- * All Rights Reserved.
- *
- * Unauthorized copying of this file or any element(s) within it, via any medium
- * is strictly prohibited.
- * This file contains Habana Labs, Ltd. proprietary and confidential information
- * and is subject to the confidentiality and license agreements under which it
- * was provided.
- *
+# Copyright (c) 2022 Habana Labs, Ltd.
+# SPDX-License-Identifier: Apache-2.0
  ******************************************************************************/
 
 // C++ Standard Libraries
