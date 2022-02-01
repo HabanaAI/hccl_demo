@@ -38,8 +38,8 @@ Alternatively, it can also be built by running the 'make' command.
     HCCL_COMM_ID     - IP of node_id=0 host and an available port, in the format <IP:PORT>
     SOCKET_NTHREADS  - Number of threads to manage TCP sockets
     NSOCK_PERTHREAD  - Number of sockets per thread
-    HCCL_OVER_TCP    - 1 to use TCP between boxes, 0 to use scaleout nics
-    HCCL_OVER_OFI    - 1 to use OFI between boxes, 0 to use scaleout nics
+    HCCL_OVER_TCP    - 1 to use TCP between servers, 0 to use scaleout nics
+    HCCL_OVER_OFI    - 1 to use OFI between servers, 0 to use scaleout nics
 
 ## Run
     HCCL_COMM_ID=<IP:PORT> HCCL_OVER_TCP={0,1} ./run_hcl_demo.py [options]
@@ -49,29 +49,29 @@ Results are printed to the display<br />
 Results can also be printed to output file by using --csv_path <path_to_file>
 
 ## Examples
-Run on 1 box (8 Gaudi devices)
+Run on 1 server (8 Gaudi devices)
 
     HCCL_COMM_ID=127.0.0.1:5555 HCCL_OVER_TCP=1 python3 run_hccl_demo.py --nranks 8 --node_id 0
 
-Run on 1 box (8 Gaudi devices) with size 32 MB
+Run on 1 server (8 Gaudi devices) with size 32 MB
 
     HCCL_COMM_ID=127.0.0.1:5555 HCCL_OVER_TCP=1 python3 run_hccl_demo.py --nranks 8 --node_id 0 --size 32m --test all_reduce
     HCCL_COMM_ID=127.0.0.1:5555 HCCL_OVER_TCP=1 python3 run_hccl_demo.py --nranks 8 --node_id 0 --size 32M --test all_reduce
     HCCL_COMM_ID=127.0.0.1:5555 HCCL_OVER_TCP=1 python3 run_hccl_demo.py --nranks 8 --node_id 0 --size 33554432 --test all_reduce
 
-Run on 2 boxes (16 Gaudi devices)
+Run on 2 servers (16 Gaudi devices)
 
-Box1:
+Server 1:
 
     HCCL_COMM_ID=10.128.11.84:9696 HCCL_OVER_TCP=0 python3 run_hccl_demo.py --nranks 16 --ranks_per_node 8 --node_id 0
     
-Box2:
+Server 2:
 
     HCCL_COMM_ID=10.128.11.84:9696 HCCL_OVER_TCP=1 python3 run_hccl_demo.py --nranks 16 --ranks_per_node 8 --node_id 1
 
 ## Results Output Examples
 
-### One box run
+### One Server run
 
 Command:
 
@@ -88,17 +88,17 @@ Outputs:
     [BENCHMARK]     Bandwidth     : 69214.565 MB/s
     #################################################################################
 
-### Two boxes run
+### Two servers run
 
-First box command:
+First server command:
     
     HCCL_COMM_ID=10.127.0.0.1:5555 HCCL_OVER_TCP=0 python3 run_hccl_demo.py --test reduce_scatter --nranks 8 --loop 1000 --node_id 0 --size 33554432 --ranks_per_node 4
    
-Second box command:
+Second server command:
 
     HCCL_COMM_ID=10.127.0.0.1:5555 HCCL_OVER_TCP=0 python3 run_hccl_demo.py --test reduce_scatter --nranks 8 --loop 1000 --node_id 0 --size 33554432 --ranks_per_node 4
 
-First box output:
+First server output:
     
     ReduceScatter hccl_rank=2 size=33554432 <float> Input Buffer [2 10 18 26 ...] reduced to Output Buffer [348 412 476 540 ...] which is fine.
     ReduceScatter hccl_rank=1 size=33554432 <float> Input Buffer [1 9 17 25 ...] reduced to Output Buffer [604 668 732 796 ...] which is fine.
@@ -109,7 +109,7 @@ First box output:
     [BENCHMARK]     Bandwidth     : 49980.655 MB/s
     ###################################################################################
 
-Second box output:
+Second server output:
     
     ReduceScatter hccl_rank=6 size=33554432 <float> Input Buffer [6 14 22 30 ...] reduced to Output Buffer [156 220 284 348 ...] which is fine.
     ReduceScatter hccl_rank=5 size=33554432 <float> Input Buffer [5 13 21 29 ...] reduced to Output Buffer [412 476 540 604 ...] which is fine.
