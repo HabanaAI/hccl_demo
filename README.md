@@ -10,6 +10,8 @@ The following list supported collective communication:
 
 Send/Recs is the supported point to point communication.
 
+Supported from v1.3.0 and above.
+
 ## Contents
 1. C++ project which includes all tests and a makefile
 2. Python wrapper which builds and runs the tests on multiple processes according to the number of devices
