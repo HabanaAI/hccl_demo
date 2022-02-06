@@ -1,17 +1,17 @@
 # HCCL Demo
-HCCL demo is a program demostrating HCCL usage.<br />
-HCCL demo supports communication via Gaudi scaleout or host scaleout (TCP and OFI).<br />
-Supported collective communication:
+HCCL demo is a program that demonstrates HCCL usage and supports communication via Gaudi<br />
+based Scale out or host NIC Scale out. Host NIC Scale out is achieved using TCP and OFI.<br />
+
+The following list supported collective communication:
 1. All_reduce
 2. All_gather
 3. Reduce_scatter
 4. Broadcast
 
-Supported point to point communication:
-1. Send/Recv
+Send/Recs is the supported point to point communication.
 
 ## Contents
-1. C++ project with all tests and makefile
+1. C++ project which includes all tests and a makefile
 2. Python wrapper which builds and runs the tests on multiple processes according to the number of devices
 
 ## Licensing
@@ -19,8 +19,8 @@ Copyright (c) 2022 Habana Labs, Ltd.<br />
 SPDX-License-Identifier: Apache-2.0
 
 ## Build
-Building and cleaning of the project is handled by the Python wrapper.<br />
-Alternatively, it can also be built by running the 'make' command.
+The Python wrapper builds and cleans the project.<br />
+Alternatively, runnning the 'make' command also builts the project.
 
 ## Python wrapper arguments
     --nranks         - int, Number of ranks participating in the demo
@@ -49,35 +49,22 @@ Results are printed to the display<br />
 Results can also be printed to output file by using --csv_path <path_to_file>
 
 ## Examples
-Run on 1 server (8 Gaudi devices)
+### Running HCCL on 1 server (8 Gaudi devices)
+One server with 8 ranks
 
     HCCL_COMM_ID=127.0.0.1:5555 HCCL_OVER_TCP=1 python3 run_hccl_demo.py --nranks 8 --node_id 0
 
-Run on 1 server (8 Gaudi devices) with size 32 MB
+One server with 8 ranks and size of 32 MB
 
     HCCL_COMM_ID=127.0.0.1:5555 HCCL_OVER_TCP=1 python3 run_hccl_demo.py --nranks 8 --node_id 0 --size 32m --test all_reduce
     HCCL_COMM_ID=127.0.0.1:5555 HCCL_OVER_TCP=1 python3 run_hccl_demo.py --nranks 8 --node_id 0 --size 32M --test all_reduce
     HCCL_COMM_ID=127.0.0.1:5555 HCCL_OVER_TCP=1 python3 run_hccl_demo.py --nranks 8 --node_id 0 --size 33554432 --test all_reduce
-
-Run on 2 servers (16 Gaudi devices)
-
-Server 1:
-
-    HCCL_COMM_ID=10.128.11.84:9696 HCCL_OVER_TCP=0 python3 run_hccl_demo.py --nranks 16 --ranks_per_node 8 --node_id 0
     
-Server 2:
-
-    HCCL_COMM_ID=10.128.11.84:9696 HCCL_OVER_TCP=1 python3 run_hccl_demo.py --nranks 16 --ranks_per_node 8 --node_id 1
-
-## Results Output Examples
-
-### One Server run
-
-Command:
+One server with 4 ranks and size of 512 MB
 
     HCCL_COMM_ID=10.127.0.0.1:5555 HCCL_OVER_TCP=0 python3 run_hccl_demo.py --test all_reduce --nranks 4 --loop 1000 --node_id 0 --size 536870912 --ranks_per_node 4
 
-Outputs:
+Outputs example of run on 1 server with 4 ranks and size of 512 MB
 
     Allreduce hccl_rank=2 size=536870912 <float> Input Buffer [2 6 10 14 ...] reduced to Output Buffer [6 22 38 54 ...] which is fine.
     Allreduce hccl_rank=0 size=536870912 <float> Input Buffer [0 4 8 12 ...] reduced to Output Buffer [6 22 38 54 ...] which is fine.
@@ -88,7 +75,15 @@ Outputs:
     [BENCHMARK]     Bandwidth     : 69214.565 MB/s
     #################################################################################
 
-### Two servers run
+### Running HCCL demo on 2 servers (16 Gaudi devices)
+
+Server 1:
+
+    HCCL_COMM_ID=10.128.11.84:9696 HCCL_OVER_TCP=0 python3 run_hccl_demo.py --nranks 16 --ranks_per_node 8 --node_id 0
+    
+Server 2:
+
+    HCCL_COMM_ID=10.128.11.84:9696 HCCL_OVER_TCP=1 python3 run_hccl_demo.py --nranks 16 --ranks_per_node 8 --node_id 1
 
 First server command:
     
