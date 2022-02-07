@@ -12,7 +12,7 @@ Args
     --test           - str, Which hccl test to run (for example: broadcast/all_reduce) (default: broadcast)
     --size           - str, Data size in units of G,M,K,B or no unit (default: 33554432)
     --loop           - int, Number of iterations (default: 10)
-    --broadcast_root - int, Index of root rank for broadcast test
+    --test_root      - int, Index of root rank for broadcast and reduce tests
     --csv_path       - str, Path to a file for results output
     -clean           - Clear old executable and compile a new one
     -l               - Display a list of available tests
@@ -36,7 +36,7 @@ import signal
 
 demo_exe = "./hccl_demo"
 
-test_list = ('broadcast', 'all_reduce', 'reduce_scatter', 'all_gather', 'send_recv')
+test_list = ('broadcast', 'all_reduce', 'reduce_scatter', 'all_gather', 'send_recv', 'reduce')
 test_params = {}
 print_log = lambda *x: None
 
@@ -133,8 +133,8 @@ def handle_args():
                         help="Data size in units of G,M,K,B or no unit. Default is Bytes.", default=33554432)
     parser.add_argument("--loop", type=int,
                         help="Number of loop iterations", default=10)
-    parser.add_argument("--broadcast_root", type=int,
-                        help="Index of root rank for broadcast test (optional)")
+    parser.add_argument("--test_root", type=int,
+                        help="Index of root rank for broadcast and reduce tests (optional)")
     parser.add_argument("--csv_path", type=str, default="",
                         help="Path to a file for results output (optional)")
     parser.add_argument("-clean", action="store_true",
@@ -170,8 +170,8 @@ def handle_args():
     if args.loop:
         test_params['loop'] = args.loop
 
-    if args.broadcast_root:
-        test_params['broadcast_root'] = args.broadcast_root
+    if args.test_root:
+        test_params['test_root'] = args.test_root
 
     if args.csv_path:
         test_params['csv_path'] = args.csv_path
@@ -183,8 +183,8 @@ def handle_args():
 def get_hccl_demo_command(id=0):
     cmd_args = []
     cmd_args.append("HCCL_DEMO_TEST=" + str(test_params['test']))
-    if ('broadcast_root' in test_params):
-        cmd_args.append("HCCL_DEMO_TEST_ROOT=" + str(test_params['broadcast_root']))
+    if ('test_root' in test_params):
+        cmd_args.append("HCCL_DEMO_TEST_ROOT=" + str(test_params['test_root']))
     if ('csv_path' in test_params):
         cmd_args.append("HCCL_DEMO_CSV_PATH=" + str(test_params['csv_path']))
     else:

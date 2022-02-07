@@ -3,7 +3,7 @@ CC = g++
 AFFINITY =
 
 ifeq ($(AFFINITY_ENABLED),1)
-    $(info Compiling HCCL demo with MPI)
+    $(info Compiling HCCL demo with affinity)
     AFFINITY = affinity.cpp -D AFFINITY_ENABLED=1
 endif
 

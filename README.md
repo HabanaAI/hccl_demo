@@ -7,8 +7,9 @@ The following list supported collective communication:
 2. All_gather
 3. Reduce_scatter
 4. Broadcast
+5. Reduce
 
-Send/Recs is the supported point to point communication.
+Send/Recv is the supported point to point communication.
 
 Supported from v1.3.0 and above.
 
@@ -29,9 +30,9 @@ Alternatively, runnning the 'make' command also builts the project.
     --ranks_per_node - int, Number of ranks participating in the demo for current node
     --node_id        - int, ID of the running host. Each host should have unique id between 0-num_nodes
     --test           - str, Which hccl test to run (for example: broadcast/all_reduce) (default: broadcast)
-    --size           - str, Data size in units of G,M,K,B or no unit (default: 33554432)
+    --size           - str, Data size in units of G,M,K,B or no unit (default: 33554432 Bytes)
     --loop           - int, Number of iterations (default: 10)
-    --broadcast_root - int, Index of root rank for broadcast test
+    --test_root      - int, Index of root rank for broadcast and reduce tests
     --csv_path       - str, Path to a file for results output
     -clean           - Clear old executable and compile a new one
     -l               - Display a list of available tests
@@ -52,63 +53,67 @@ Results can also be printed to output file by using --csv_path <path_to_file>
 
 ## Examples
 ### Running HCCL on 1 server (8 Gaudi devices)
-One server with 8 ranks
 
-    HCCL_COMM_ID=127.0.0.1:5555 HCCL_OVER_TCP=1 python3 run_hccl_demo.py --nranks 8 --node_id 0
+Configuration: One server with 8 ranks, 32 MB size, all_reduce collective, 1000 iterations
 
-One server with 8 ranks and size of 32 MB
+    HCCL_COMM_ID=127.0.0.1:5555 HCCL_OVER_TCP=0 python3 run_hccl_demo.py --nranks 8 --node_id 0 --size 32m --test all_reduce --loop 1000 --ranks_per_node 8
 
-    HCCL_COMM_ID=127.0.0.1:5555 HCCL_OVER_TCP=1 python3 run_hccl_demo.py --nranks 8 --node_id 0 --size 32m --test all_reduce
-    HCCL_COMM_ID=127.0.0.1:5555 HCCL_OVER_TCP=1 python3 run_hccl_demo.py --nranks 8 --node_id 0 --size 32M --test all_reduce
-    HCCL_COMM_ID=127.0.0.1:5555 HCCL_OVER_TCP=1 python3 run_hccl_demo.py --nranks 8 --node_id 0 --size 33554432 --test all_reduce
-    
-One server with 4 ranks and size of 512 MB
+Outputs example:
 
-    HCCL_COMM_ID=10.127.0.0.1:5555 HCCL_OVER_TCP=0 python3 run_hccl_demo.py --test all_reduce --nranks 4 --loop 1000 --node_id 0 --size 536870912 --ranks_per_node 4
+    Allreduce hccl_rank=4 size=33554432 <float> Input Buffer [4 12 20 28 ...] reduced to Output Buffer [28 92 156 220 ...] which is fine.
+    Allreduce hccl_rank=5 size=33554432 <float> Input Buffer [5 13 21 29 ...] reduced to Output Buffer [28 92 156 220 ...] which is fine.
+    Allreduce hccl_rank=1 size=33554432 <float> Input Buffer [1 9 17 25 ... ] reduced to Output Buffer [28 92 156 220 ...] which is fine.
+    Allreduce hccl_rank=3 size=33554432 <float> Input Buffer [3 11 19 27 ...] reduced to Output Buffer [28 92 156 220 ...] which is fine.
+    Allreduce hccl_rank=2 size=33554432 <float> Input Buffer [2 10 18 26 ...] reduced to Output Buffer [28 92 156 220 ...] which is fine.
+    Allreduce hccl_rank=0 size=33554432 <float> Input Buffer [0 8 16 24 ... ] reduced to Output Buffer [28 92 156 220 ...] which is fine.
+    Allreduce hccl_rank=7 size=33554432 <float> Input Buffer [7 15 23 31 ...] reduced to Output Buffer [28 92 156 220 ...] which is fine.
+    Allreduce hccl_rank=6 size=33554432 <float> Input Buffer [6 14 22 30 ...] reduced to Output Buffer [28 92 156 220 ...] which is fine.
+    ###############################################################################
+    [BENCHMARK] hcclAllReduce(src!=dst, count=8388608, dtype=fp32, iterations=1000)
+    [BENCHMARK]     Bandwidth     : <Test results> MB/s
+    ###############################################################################
 
-Outputs example of run on 1 server with 4 ranks and size of 512 MB
+Different options for running one server with 8 ranks and size of 32 MB:
 
-    Allreduce hccl_rank=2 size=536870912 <float> Input Buffer [2 6 10 14 ...] reduced to Output Buffer [6 22 38 54 ...] which is fine.
-    Allreduce hccl_rank=0 size=536870912 <float> Input Buffer [0 4 8 12 ...] reduced to Output Buffer [6 22 38 54 ...] which is fine.
-    Allreduce hccl_rank=1 size=536870912 <float> Input Buffer [1 5 9 13 ...] reduced to Output Buffer [6 22 38 54 ...] which is fine.
-    Allreduce hccl_rank=3 size=536870912 <float> Input Buffer [3 7 11 15 ...] reduced to Output Buffer [6 22 38 54 ...] which is fine.
-    #################################################################################
-    [BENCHMARK] hcclAllReduce(src!=dst, count=134217728, dtype=fp32, iterations=1000)
-    [BENCHMARK]     Bandwidth     : 69214.565 MB/s
-    #################################################################################
-
+    HCCL_COMM_ID=127.0.0.1:5555 HCCL_OVER_TCP=0 python3 run_hccl_demo.py --nranks 8 --node_id 0 --size 32m --test all_reduce
+    HCCL_COMM_ID=127.0.0.1:5555 HCCL_OVER_TCP=0 python3 run_hccl_demo.py --nranks 8 --node_id 0 --size 32M --test all_reduce
+    HCCL_COMM_ID=127.0.0.1:5555 HCCL_OVER_TCP=0 python3 run_hccl_demo.py --nranks 8 --node_id 0 --size 33554432 --test all_reduce
+    HCCL_COMM_ID=127.0.0.1:5555 HCCL_OVER_TCP=0 python3 run_hccl_demo.py --nranks 8 --node_id 0 --size 33554432b --test all_reduce
+    HCCL_COMM_ID=127.0.0.1:5555 HCCL_OVER_TCP=0 python3 run_hccl_demo.py --nranks 8 --node_id 0 --size 33554432B --test all_reduce
 ### Running HCCL demo on 2 servers (16 Gaudi devices)
 
-Server 1:
-
-    HCCL_COMM_ID=10.128.11.84:9696 HCCL_OVER_TCP=0 python3 run_hccl_demo.py --nranks 16 --ranks_per_node 8 --node_id 0
-    
-Server 2:
-
-    HCCL_COMM_ID=10.128.11.84:9696 HCCL_OVER_TCP=1 python3 run_hccl_demo.py --nranks 16 --ranks_per_node 8 --node_id 1
+Configuration: Host NIC Scale out using TCP, 16 ranks, 32 MB size, all_reduce collective, 1000 iterations
 
 First server command:
-    
-    HCCL_COMM_ID=10.127.0.0.1:5555 HCCL_OVER_TCP=0 python3 run_hccl_demo.py --test reduce_scatter --nranks 8 --loop 1000 --node_id 0 --size 33554432 --ranks_per_node 4
-   
+
+    HCCL_COMM_ID=10.111.12.234:5555 HCCL_OVER_TCP=1 python3 run_hccl_demo.py --test all_reduce --nranks 16 --loop 1000 --node_id 0 --size 32m --ranks_per_node 8
+
 Second server command:
 
-    HCCL_COMM_ID=10.127.0.0.1:5555 HCCL_OVER_TCP=0 python3 run_hccl_demo.py --test reduce_scatter --nranks 8 --loop 1000 --node_id 0 --size 33554432 --ranks_per_node 4
+    HCCL_COMM_ID=10.111.12.234:5555 HCCL_OVER_TCP=1 python3 run_hccl_demo.py --test all_reduce --nranks 16 --loop 1000 --node_id 1 --size 32m --ranks_per_node 8
 
 First server output:
-    
-    ReduceScatter hccl_rank=2 size=33554432 <float> Input Buffer [2 10 18 26 ...] reduced to Output Buffer [348 412 476 540 ...] which is fine.
-    ReduceScatter hccl_rank=1 size=33554432 <float> Input Buffer [1 9 17 25 ...] reduced to Output Buffer [604 668 732 796 ...] which is fine.
-    ReduceScatter hccl_rank=3 size=33554432 <float> Input Buffer [3 11 19 27 ...] reduced to Output Buffer [92 156 220 284 ...] which is fine.
-    ReduceScatter hccl_rank=0 size=33554432 <float> Input Buffer [0 8 16 24 ...] reduced to Output Buffer [28 92 156 220 ...] which is fine.
-    ###################################################################################
-    [BENCHMARK] hcclReduceScatter(src!=dst, count=8388608, dtype=fp32, iterations=1000)
-    [BENCHMARK]     Bandwidth     : 49980.655 MB/s
-    ###################################################################################
+
+    Allreduce hccl_rank=0 size=33554432 <float> Input Buffer [0 16 32 48 ...] reduced to Output Buffer [120 376 632 888 ...] which is fine.
+    Allreduce hccl_rank=3 size=33554432 <float> Input Buffer [3 19 35 51 ...] reduced to Output Buffer [120 376 632 888 ...] which is fine.
+    Allreduce hccl_rank=7 size=33554432 <float> Input Buffer [7 23 39 55 ...] reduced to Output Buffer [120 376 632 888 ...] which is fine.
+    Allreduce hccl_rank=4 size=33554432 <float> Input Buffer [4 20 36 52 ...] reduced to Output Buffer [120 376 632 888 ...] which is fine.
+    Allreduce hccl_rank=6 size=33554432 <float> Input Buffer [6 22 38 54 ...] reduced to Output Buffer [120 376 632 888 ...] which is fine.
+    Allreduce hccl_rank=1 size=33554432 <float> Input Buffer [1 17 33 49 ...] reduced to Output Buffer [120 376 632 888 ...] which is fine.
+    Allreduce hccl_rank=2 size=33554432 <float> Input Buffer [2 18 34 50 ...] reduced to Output Buffer [120 376 632 888 ...] which is fine.
+    Allreduce hccl_rank=5 size=33554432 <float> Input Buffer [5 21 37 53 ...] reduced to Output Buffer [120 376 632 888 ...] which is fine.
+    ###############################################################################
+    [BENCHMARK] hcclAllReduce(src!=dst, count=8388608, dtype=fp32, iterations=1000)
+    [BENCHMARK]     Bandwidth     : <Test results> MB/s
+    ###############################################################################
 
 Second server output:
-    
-    ReduceScatter hccl_rank=6 size=33554432 <float> Input Buffer [6 14 22 30 ...] reduced to Output Buffer [156 220 284 348 ...] which is fine.
-    ReduceScatter hccl_rank=5 size=33554432 <float> Input Buffer [5 13 21 29 ...] reduced to Output Buffer [412 476 540 604 ...] which is fine.
-    ReduceScatter hccl_rank=7 size=33554432 <float> Input Buffer [7 15 23 31 ...] reduced to Output Buffer [732 796 28 92 ...] which is fine.
-    ReduceScatter hccl_rank=4 size=33554432 <float> Input Buffer [4 12 20 28 ...] reduced to Output Buffer [668 732 796 28 ...] which is fine.
+
+    Allreduce hccl_rank=13 size=33554432 <float> Input Buffer [13 29 45 61 ...] reduced to Output Buffer [120 376 632 888 ...] which is fine.
+    Allreduce hccl_rank=12 size=33554432 <float> Input Buffer [12 28 44 60 ...] reduced to Output Buffer [120 376 632 888 ...] which is fine.
+    Allreduce hccl_rank=11 size=33554432 <float> Input Buffer [11 27 43 59 ...] reduced to Output Buffer [120 376 632 888 ...] which is fine.
+    Allreduce hccl_rank=15 size=33554432 <float> Input Buffer [15 31 47 63 ...] reduced to Output Buffer [120 376 632 888 ...] which is fine.
+    Allreduce hccl_rank=9 size=33554432 <float> Input Buffer  [9 25 41 57 ... ] reduced to Output Buffer [120 376 632 888 ...] which is fine.
+    Allreduce hccl_rank=8 size=33554432 <float> Input Buffer  [8 24 40 56 ... ] reduced to Output Buffer [120 376 632 888 ...] which is fine.
+    Allreduce hccl_rank=14 size=33554432 <float> Input Buffer [14 30 46 62 ...] reduced to Output Buffer [120 376 632 888 ...] which is fine.
+    Allreduce hccl_rank=10 size=33554432 <float> Input Buffer [10 26 42 58 ...] reduced to Output Buffer [120 376 632 888 ...] which is fine.
