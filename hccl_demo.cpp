@@ -744,7 +744,7 @@ int main()
         else if (test_type == "send_recv")
         {
             double send_recv_factor = 1;
-            int    peerRank         = get_hccl_rank() % 2 ? get_hccl_rank() - 1 : get_hccl_rank() + 1;
+            int    peerRank         = (get_hccl_rank() % 2) != 0 ? get_hccl_rank() - 1 : get_hccl_rank() + 1;
 
             auto stat = benchmark(demo_data, [&]() {
                 CHECK_HCCL_STATUS(send_recv_test((void*) output_dev_ptr,
@@ -795,6 +795,106 @@ int main()
                           stat,
                           data_size,
                           send_recv_factor,
+                          hccl_rank,
+                          demo_data.num_iters,
+                          test_type,
+                          "float");
+        }
+        else if (test_type == "reduce")
+        {
+            double reduce_factor = 1;
+            int    root          = get_demo_test_root();
+            // Fill input data, example:
+            // root = G1
+            // Input        |   Output
+            // G0 G1 G2 G3      G0 G1 G2 G3
+            // 0  1  2  3   =>      6
+            // 4  5  6  7          22
+            // 8  9  10 11         38
+            // 12 13 14 15         54
+
+            for (uint64_t i = 0; i < count; ++i)
+            {
+                input_host_data[i] = hccl_rank + (demo_data.nranks * (i % DATA_ELEMENTS_MAX));
+            }
+
+            // Copy from input_host_data_ptr to input_dev_ptr (to be used in benchmark)
+            CHECK_SYNAPSE_STATUS(synMemCopyAsync(demo_data.host_to_device_stream,
+                                                 (uint64_t) input_host_data_ptr,
+                                                 data_size,
+                                                 input_dev_ptr,
+                                                 HOST_TO_DRAM));
+
+            CHECK_SYNAPSE_STATUS(synStreamSynchronize(demo_data.host_to_device_stream));
+
+            // Run HCCL Reduce collective
+            auto stat = benchmark(demo_data, [&]() {
+                CHECK_HCCL_STATUS(hcclReduce((const void*) input_dev_ptr,
+                                             (void*) output_dev_ptr,
+                                             input_host_data.size(),
+                                             hcclFloat32,
+                                             hcclSum,
+                                             root,
+                                             demo_data.hccl_comm,
+                                             demo_data.collective_stream));
+            });
+
+            // Correctness check
+            bool is_ok = true;
+
+            auto        output_host_data     = std::vector<float>(input_host_data.size());
+            const void* output_host_data_ptr = reinterpret_cast<void*>(output_host_data.data());
+
+            log() << "Reduce hccl_rank=" << hccl_rank << " root=" << root << " size=" << data_size << " <float>"
+                  << " Input Buffer [" << input_host_data[0] << " " << input_host_data[1] << " " << input_host_data[2]
+                  << " " << input_host_data[3] << " ...]";
+
+            // The correctness check is relevant for the root's output buffer only
+            if (hccl_rank == root)
+            {
+                CHECK_SYNAPSE_STATUS(synHostMap(demo_data.device_handle, data_size, output_host_data_ptr));
+                CHECK_SYNAPSE_STATUS(synMemCopyAsync(demo_data.device_to_host_stream,
+                                                     output_dev_ptr,
+                                                     data_size,
+                                                     (uint64_t) output_host_data_ptr,
+                                                     DRAM_TO_HOST));
+                CHECK_SYNAPSE_STATUS(synStreamSynchronize(demo_data.device_to_host_stream));
+
+                int start = 0;
+                int end   = demo_data.nranks - 1;
+                int expected;
+                int addCommSize;
+
+                for (size_t i = 0; i < input_host_data.size(); ++i)
+                {
+                    addCommSize = demo_data.nranks * (i % DATA_ELEMENTS_MAX);
+                    // Arithmetic progression
+                    expected = ((start + addCommSize) + (end + addCommSize)) * demo_data.nranks / 2;
+                    if (std::abs(output_host_data[i] - expected) != 0)
+                    {
+                        is_ok = false;
+                    }
+                }
+
+                log() << " Output Buffer [" << output_host_data[0] << " " << output_host_data[1] << " "
+                      << output_host_data[2] << " " << output_host_data[3] << " ...]"
+                      << " which is " << (is_ok ? "fine." : "bad.") << std::endl;
+            }
+            else
+            {
+                log() << std::endl;
+            }
+
+            CHECK_SYNAPSE_STATUS(synHostUnmap(demo_data.device_handle, input_host_data_ptr));
+            CHECK_SYNAPSE_STATUS(synHostUnmap(demo_data.device_handle, output_host_data_ptr));
+
+            // End of correctness check
+
+            describe_stat("Reduce(count=" + std::to_string(input_host_data.size()) +
+                              ", dtype=fp32, iterations=" + std::to_string(demo_data.num_iters) + ")",
+                          stat,
+                          data_size,
+                          reduce_factor,
                           hccl_rank,
                           demo_data.num_iters,
                           test_type,
