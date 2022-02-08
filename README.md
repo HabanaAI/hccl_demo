@@ -23,7 +23,8 @@ SPDX-License-Identifier: Apache-2.0
 
 ## Build
 The Python wrapper builds and cleans the project.<br />
-Alternatively, runnning the 'make' command also builts the project.
+Alternatively, running the 'make' command also builds the project.
+By default, the demo is built with affinity configuration.
 
 ## Python wrapper arguments
     --nranks         - int, Number of ranks participating in the demo
