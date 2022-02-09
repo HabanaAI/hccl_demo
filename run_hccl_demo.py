@@ -113,10 +113,8 @@ def parse_size(size):
     return size
 
 def handle_affinity():
-    if is_dev():
-        if 'AFFINITY_ENABLED' in os.environ and int(os.environ['AFFINITY_ENABLED']):
-            from affinity import create_affinity_files
-            create_affinity_files()
+    from affinity import create_affinity_files
+    create_affinity_files()
 
 def handle_args():
     parser = argparse.ArgumentParser(description="""Run HCL demo test""")
