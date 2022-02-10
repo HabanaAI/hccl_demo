@@ -7,11 +7,12 @@ def create_affinity_files():
     if 'DISABLE_PROC_AFFINITY' in os.environ and int(os.environ['DISABLE_PROC_AFFINITY']):
         return
     print("Affinity: Creating affinity files...")
-    run_script_cmd = "./list_affinity_topology.sh"
+    file_name = "list_affinity_topology.sh"
+    run_script_cmd = f"bash {file_name}"
 
     # Return if the script does not exist
-    if not os.path.isfile(run_script_cmd):
-        print("Affinity: Could not find list_affinity_topology.sh")
+    if not os.path.isfile(file_name):
+        print(f"Affinity: Could not find {file_name}")
         return
 
     # Set the output directory for the moduleID<->numa mapping
