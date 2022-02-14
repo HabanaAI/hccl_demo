@@ -46,6 +46,13 @@ By default, the demo is built with affinity configuration.
     HCCL_OVER_OFI    - 1 to use OFI between servers, 0 to use scaleout nics
 
 ## Run
+
+On DL1 (Gaudi instance on AWS), following should be set when using Ubuntu20 AMI:
+
+    echo 0 > /proc/sys/kernel/numa_balancing
+
+Run the execution command
+
     HCCL_COMM_ID=<IP:PORT> HCCL_OVER_TCP={0,1} ./run_hcl_demo.py [options]
 
 ## Results
