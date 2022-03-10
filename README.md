@@ -47,7 +47,7 @@ By default, the demo is built with affinity configuration.
 
 ## Run
 
-On DL1 (Gaudi instance on AWS), following should be set when using Ubuntu20 AMI:
+When using any operating system that have Linux kernel version between 5.9.x and 5.16.x. Currently this is applicable to Ubuntu20 and Amazon Linux 2 AMIs:
 
     echo 0 > /proc/sys/kernel/numa_balancing
 
