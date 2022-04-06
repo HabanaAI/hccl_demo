@@ -33,6 +33,20 @@
 #define DEFAULT_BOX_SIZE  8
 #define NUMBER_OF_WARMUPS 100
 
+#if MPI_ENABLED
+// Open MPI (v4.0.2)
+#include <mpi.h>
+
+#define CHECK_MPI_STATUS(x)                                                                                            \
+    {                                                                                                                  \
+        const auto _res = (x);                                                                                         \
+        if (_res != MPI_SUCCESS)                                                                                       \
+            throw std::runtime_error {"In function " + std::string {__FUNCTION__} +                                    \
+                                      "(): " #x " failed with code: " + std::to_string(_res)};                         \
+    }
+
+#endif  //MPI_ENABLED
+
 using namespace std;
 using Clock = chrono::high_resolution_clock;
 
@@ -193,7 +207,11 @@ int get_demo_box_size()
     static auto box_size  = DEFAULT_BOX_SIZE;
     if (!is_cached)
     {
+#if MPI_ENABLED
+        char* env_value = getenv("OMPI_COMM_WORLD_LOCAL_SIZE");
+#else
         char* env_value = getenv("HCCL_BOX_SIZE");
+#endif
         box_size        = (env_value != nullptr) ? atoi(env_value) : box_size;
         is_cached       = true;
     }
@@ -254,6 +272,12 @@ string get_demo_csv_path()
 
 int get_nranks()
 {
+#if MPI_ENABLED
+    int mpi_size {};
+    CHECK_MPI_STATUS(MPI_Comm_size(MPI_COMM_WORLD, &mpi_size));
+    return mpi_size;
+#endif  // MPI_ENABLED
+
     static bool is_cached   = false;
     static auto test_nranks = 0;
     if (!is_cached)
@@ -267,6 +291,12 @@ int get_nranks()
 
 int get_hccl_rank()
 {
+#if MPI_ENABLED
+    int mpi_rank {};
+    CHECK_MPI_STATUS(MPI_Comm_rank(MPI_COMM_WORLD, &mpi_rank));
+    return mpi_rank;
+#endif  // MPI_ENABLED
+
     static bool is_cached = false;
     static auto test_rank = -1;
     if (!is_cached)
@@ -331,9 +361,17 @@ hcclResult_t send_recv_test(
 
 int main()
 {
+    bool is_ok = true;
     try
     {
         log() << "Running HCCL Demo :: A simple program demonstrating HCCL usage from C++" << endl;
+
+#if MPI_ENABLED
+        log() << "MPI enabled. Make sure that HCCL demo is launched with mpirun." << std::endl;
+        // Initialize the Open MPI execution context.
+        CHECK_MPI_STATUS(MPI_Init(NULL, NULL));
+#endif  //MPI_ENABLED
+
         hccl_demo_data demo_data;
         demo_data.nranks    = get_nranks();
         demo_data.num_iters = get_demo_test_loop();
@@ -370,6 +408,10 @@ int main()
         {
             CHECK_HCCL_STATUS(hcclGetUniqueId(&unique_id));
         }
+
+#if MPI_ENABLED
+        CHECK_MPI_STATUS(MPI_Bcast(&unique_id, sizeof(unique_id), MPI_BYTE, master_mpi_rank, MPI_COMM_WORLD));
+#endif  // MPI_ENABLED
 
         // Create new HCCL communicator
         CHECK_HCCL_STATUS(hcclCommInitRank(&demo_data.hccl_comm, demo_data.nranks, unique_id, hccl_rank));
@@ -426,8 +468,6 @@ int main()
             });
 
             // Correctness check
-
-            bool is_ok = true;
 
             auto        output_host_data     = vector<float>(input_host_data.size());
             const void* output_host_data_ptr = reinterpret_cast<void*>(output_host_data.data());
@@ -509,8 +549,6 @@ int main()
             });
 
             // Correctness check
-
-            bool is_ok = true;
 
             auto        output_host_data     = vector<float>(input_host_data.size());
             const void* output_host_data_ptr = reinterpret_cast<void*>(output_host_data.data());
@@ -600,8 +638,6 @@ int main()
             });
 
             // Correctness check
-
-            bool        is_ok                = true;
             auto        output_host_data     = vector<float>(input_host_data.size() / demo_data.nranks);
             const void* output_host_data_ptr = reinterpret_cast<void*>(output_host_data.data());
 
@@ -698,7 +734,6 @@ int main()
 
             // Correctness check
 
-            bool        is_ok                = true;
             auto        output_host_data     = vector<float>(input_host_data.size() * demo_data.nranks);
             const void* output_host_data_ptr = reinterpret_cast<void*>(output_host_data.data());
 
@@ -756,7 +791,6 @@ int main()
             });
 
             // Correctness check
-            bool is_ok = true;
 
             auto        output_host_data     = vector<float>(input_host_data.size());
             const void* output_host_data_ptr = reinterpret_cast<void*>(output_host_data.data());
@@ -840,7 +874,6 @@ int main()
             });
 
             // Correctness check
-            bool is_ok = true;
 
             auto        output_host_data     = std::vector<float>(input_host_data.size());
             const void* output_host_data_ptr = reinterpret_cast<void*>(output_host_data.data());
@@ -919,6 +952,14 @@ int main()
 
         // Destroy synapse api context
         CHECK_SYNAPSE_STATUS(synDestroy());
+
+#if MPI_ENABLED
+        CHECK_MPI_STATUS(MPI_Finalize());
+#endif  // MPI_ENABLED
+        if (!is_ok)
+        {
+            throw runtime_error {"Collective operation has failed on corretness."};
+        }
     }
     catch (const exception& ex)
     {

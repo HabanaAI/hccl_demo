@@ -75,8 +75,11 @@ create_configuration_table()
    for i in `cat $file_pcie_bus_id|awk '{print $4}'`; do
       numa_node=`cat /sys/bus/pci/devices/$i/numa_node`
       if [ $numa_node -ge 0 ]; then
-         echo $numa_node >> $file_pcie_numa
+         echo $numa_node | tee -a $file_pcie_numa > /dev/null
       else
+         for i in `hl-smi -L|grep "Bus Id"|awk '{print $4}'`; do
+            affinity_print "PCIE:"$i", NUMA:"`cat /sys/bus/pci/devices/$i/numa_node`;
+         done
          affinity_print "Failed to read numa to PCIe device mapping, aborting"
          exit 1
       fi
@@ -103,8 +106,8 @@ create_thread_list()
       # Get the list of threads
       if [ $numa_node -ge 0 ]; then
          vector=`lscpu --parse | grep ",$numa_node,,"|awk -F"," '{print $1}'`
-         echo $vector > $NUMA_MAPPING_DIR/.habana_moduleID$module_id
-         echo $vector >> $temp_dir/.module
+         echo $vector | tee $NUMA_MAPPING_DIR/.habana_moduleID$module_id > /dev/null
+         echo $vector | tee -a $temp_dir/.module > /dev/null
       fi
    done
 }
@@ -112,9 +115,9 @@ create_thread_list()
 add_thread_list_to_config_table()
 {
    # Combine output
-   echo "ModID   BusID  NUMA   CPUs: " > $file_final_output
-   echo "=====   =====  =====  ===== " >> $file_final_output
-   paste $file_configuration_table $temp_dir/.module >> $file_final_output
+   echo "ModID   BusID  NUMA   CPUs: " | tee $file_final_output > /dev/null
+   echo "=====   =====  =====  ===== " | tee -a $file_final_output > /dev/null
+   paste $file_configuration_table $temp_dir/.module | tee -a $file_final_output > /dev/null
 }
 
 clean_up()
@@ -127,14 +130,34 @@ clean_up()
 
 main()
 {
-   check_env
-   hl_smi_check
-   create_temp_files
-   create_configuration_table
-   create_thread_list
-   add_thread_list_to_config_table
-   clean_up
-   affinity_print "Script has finished successfully"
+   if [ "$OMPI_COMM_WORLD_LOCAL_RANK" == "0" ] || [ "$MPI_ENABLED" == "0" ];
+   then
+      if [[ -z "${NUMA_MAPPING_DIR}" ]];
+      then
+         output_path="/tmp/affinity_topology_output"
+         export NUMA_MAPPING_DIR="/tmp/affinity_topology_output"
+      else
+         output_path="${NUMA_MAPPING_DIR}"
+      fi
+      if [ ! -d $output_path ];
+      then
+         mkdir -m 777 $output_path
+      fi
+      output_file="${output_path}/.habana_moduleID0"
+      if [ ! -f $output_file ];
+      then
+         echo "Affinity: Script has not been executed before, going to execute..."
+         hl_smi_check
+         create_temp_files
+         create_configuration_table
+         create_thread_list
+         add_thread_list_to_config_table
+         clean_up
+         affinity_print "Script has finished successfully"
+      else
+          echo "Affinity: Script has been executed before."
+      fi
+   fi
    exit 0
 }
 
