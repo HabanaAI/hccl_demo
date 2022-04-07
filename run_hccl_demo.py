@@ -3,19 +3,20 @@
 """
 HCCL demo runner.
 Usage example -
-HCCL_COMM_ID=127.0.0.1:5553 HCCL_OVER_TCP=0 python3 run_hccl_demo.py --test broadcast --nranks 16 --node_id=0 --ranks_per_node 8
+HCCL_COMM_ID=127.0.0.1:5553 HCCL_OVER_TCP=0 python3 run_hccl_demo.py --test broadcast --nranks 8 --node_id=0 --ranks_per_node 8
 
 Args
-    --nranks         - int, Number of ranks participating in the demo
-    --ranks_per_node - int, Number of ranks participating in the demo for current node
-    --node_id        - int, ID of the running host. Each host should have unique id between 0-num_nodes
-    --test           - str, Which hccl test to run (for example: broadcast/all_reduce) (default: broadcast)
-    --size           - str, Data size in units of G,M,K,B or no unit (default: 33554432)
-    --loop           - int, Number of iterations (default: 10)
-    --test_root      - int, Index of root rank for broadcast and reduce tests
-    --csv_path       - str, Path to a file for results output
-    -clean           - Clear old executable and compile a new one
-    -l               - Display a list of available tests
+    --nranks          - int, Number of ranks participating in the demo
+    --ranks_per_node  - int, Number of ranks participating in the demo for current node
+    --node_id         - int, ID of the running host. Each host should have unique id between 0-num_nodes
+    --test            - str, Which hccl test to run (for example: broadcast/all_reduce) (default: broadcast)
+    --size            - str, Data size in units of G,M,K,B or no unit (default: 33554432)
+    --loop            - int, Number of iterations (default: 10)
+    --test_root       - int, Index of root rank for broadcast and reduce tests
+    --csv_path        - str, Path to a file for results output
+    -mpi              - Use MPI for managing execution
+    -clean            - Clear old executable and compile a new one
+    -l                - Display a list of available tests
 
 Env variables - General
     HCCL_COMM_ID     - IP of node_id=0 host and an available port, in the format <IP:PORT>
@@ -35,6 +36,9 @@ import subprocess
 import signal
 
 demo_exe = "./hccl_demo"
+mpi_mode = False
+SUCCESS = 0
+ERROR = 1
 
 test_list = ('broadcast', 'all_reduce', 'reduce_scatter', 'all_gather', 'send_recv', 'reduce')
 test_params = {}
@@ -56,8 +60,9 @@ def get_ranks_per_node():
     return int(ranks_per_node[0])
 
 def read_settings():
-    global num_processes
-    num_processes = min(test_params["ranks_per_node"], test_params["nranks"])
+    if not mpi_mode:
+        global num_processes
+        num_processes = min(test_params["ranks_per_node"], test_params["nranks"])
 
 def is_dev():
     if 'SYNAPSE_RELEASE_BUILD' in os.environ:
@@ -65,21 +70,28 @@ def is_dev():
     else:
         return False
 
-def handle_make(isClean=False):
-    make_cmd = 'make'
-    if isClean:
-        make_cmd += ' clean'
-    elif is_dev():
-        print_log('Detected dev environment!')
-        make_cmd += ' dev'
-    run_process(make_cmd)
+def handle_make(mpi_args, isClean=False):
+    try:
+        make_cmd = ''
+        if mpi_mode:
+            make_cmd = get_mpi_command(mpi_args) + ' -x MPI_ENABLED=1'
+        make_cmd += ' bash build_demo.sh'
+        if isClean:
+            make_cmd += ' clean'
+        elif is_dev():
+            print_log('Detected development environment, going to build using make dev')
+            make_cmd += ' dev'
+        return run_process(make_cmd)
+    except Exception as e:
+        print("Exception in handle_make(): {}".format(e))
+        raise e
 
 def clear_logs():
     rm_cmd = 'rm -rf ~/.habana_logs*'
     run_process(rm_cmd)
 
 def clean_artifacts():
-    handle_make(isClean=True)
+    handle_make(None, isClean=True)
     clear_logs()
     all_files = os.listdir(".")
     files_to_delete = [f for f in all_files if f.endswith('.recipe.used') or f.endswith('.csv')]
@@ -112,12 +124,12 @@ def parse_size(size):
         return str(int(number*unit_size))
     return size
 
-def handle_affinity():
+def handle_affinity(mpi_args):
     from affinity import create_affinity_files
-    create_affinity_files()
+    return create_affinity_files(mpi_mode, mpi_args)
 
 def handle_args():
-    parser = argparse.ArgumentParser(description="""Run HCL demo test""")
+    parser = argparse.ArgumentParser(description="""Run HCL demo test""", allow_abbrev=False)
 
     parser.add_argument("--nranks", type=int,
                         help="Number of ranks in the communicator")
@@ -135,31 +147,44 @@ def handle_args():
                         help="Index of root rank for broadcast and reduce tests (optional)")
     parser.add_argument("--csv_path", type=str, default="",
                         help="Path to a file for results output (optional)")
+    parser.add_argument("-mpi", action="store_true",
+                        help="Use MPI for managing execution")
     parser.add_argument("-clean", action="store_true",
                         help="Clean previous artifacts including logs, recipe and csv results")
     parser.add_argument("-l", "--list_tests", action="store_true",
                         help="Display a list of available tests")
 
-    args = parser.parse_args()
+    args, mpi_args = parser.parse_known_args()
 
     if args.clean:
         clean_artifacts()
 
-    if args.nranks:
-        test_params["nranks"] = args.nranks
-    if args.ranks_per_node:
-        test_params["ranks_per_node"] = args.ranks_per_node
+    if args.mpi:
+        global mpi_mode
+        mpi_mode = True
+        print("Running in MPI mode")
     else:
-        test_params["ranks_per_node"] = get_ranks_per_node()
+        if mpi_args != []:
+            print("The following argument cannot be used: " + str(mpi_args))
+            exit_demo(ERROR)
 
-    if args.node_id >= 0:
-        test_params["node_id"] = args.node_id
+    if not mpi_mode:
+        if args.nranks:
+            test_params["nranks"] = args.nranks
+
+        if args.ranks_per_node:
+            test_params["ranks_per_node"] = args.ranks_per_node
+        else:
+            test_params["ranks_per_node"] = get_ranks_per_node()
+
+        if args.node_id >= 0:
+            test_params["node_id"] = args.node_id
 
     if args.test:
         if not args.test in test_list:
             print(f'Error: no test {args.test}. Select a test from the list:')
             show_test_list()
-            sys.exit(1)
+            exit_demo(ERROR)
         test_params["test"] = args.test
 
     if args.size:
@@ -176,7 +201,13 @@ def handle_args():
 
     if args.list_tests:
         show_test_list()
-        sys.exit(0)
+        exit_demo(SUCCESS)
+
+    return mpi_args
+
+def exit_demo(exit_code):
+    print("Exiting the demo with: " + str(exit_code))
+    sys.exit(exit_code)
 
 def get_hccl_demo_command(id=0):
     cmd_args = []
@@ -189,46 +220,93 @@ def get_hccl_demo_command(id=0):
         cmd_args.append("HCCL_DEMO_TEST_SIZE=" + str(test_params['size']))
     cmd_args.append("HCCL_DEMO_TEST_LOOP=" + str(test_params['loop']))
 
-    rank = id + test_params["node_id"] * num_processes
-    cmd_args.append("HCCL_RANK=" + str(rank))
-    cmd_args.append("HCCL_NRANKS=" + str(test_params["nranks"]))
-    cmd_args.append("HCCL_BOX_SIZE=" + str(test_params["ranks_per_node"]))
-    cmd_args.append(demo_exe)
+    if not mpi_mode:
+        rank = id + test_params["node_id"] * num_processes
+        cmd_args.append("HCCL_RANK=" + str(rank))
+        cmd_args.append("HCCL_NRANKS=" + str(test_params["nranks"]))
+        cmd_args.append("HCCL_BOX_SIZE=" + str(test_params["ranks_per_node"]))
+        cmd_args.append(demo_exe)
+
     cmd = " ".join(cmd_args)
     return cmd
 
-def main():
-    handle_args()
-    print_log("Printing test params:")
-    print_log(test_params)
-    read_settings()
-    handle_affinity()
+def get_mpi_command(mpi_args):
+    mpi = get_mpi_prefix()
+    return mpi + " --allow-run-as-root " + ' '.join(mpi_args)
 
-    # Create the test executable if not found
-    if not os.path.exists(demo_exe):
-        handle_make()
+def get_mpi_prefix():
+    result = subprocess.run(['which', 'mpirun'], stdout=subprocess.PIPE)
+    return str(result.stdout.decode('utf-8').strip())
 
-    processes = []
-
-    for i in range(num_processes):
-        p = get_hccl_demo_command(i)
-        processes.append(p)
-
-    pool = Pool(processes=test_params["nranks"])
-
-    results = pool.imap_unordered(run_process, processes)
-    for res in results:
-        if res != 0:
+def run_mpi_test(mpi_args):
+    try:
+        cmd = get_hccl_demo_command()
+        mpi_cmd = get_mpi_command(mpi_args)
+        for i in cmd.split(" "):
+            mpi_cmd += " -x " + i
+        mpi_cmd += " hccl_demo"
+        process = subprocess.Popen(mpi_cmd, shell=True)
+        process.wait()
+        process.communicate()
+        return_code = process.poll()
+        if return_code != 0:
             print("One of the hccl_test processes failed, terminating hccl demo.")
-            pool.close()
-            pool.terminate()
-            pool.join()
-            os.killpg(0, signal.SIGTERM)
-            sys.exit(os.EX_DATAERR)
-            break
+            exit_demo(return_code)
+    except subprocess.SubprocessError as e:
+        print("Exception in run_mpi_test(): {} subprocess.Popen({})".format(e, mpi_cmd))
+        raise subprocess.SubprocessError
 
-    pool.close()
-    pool.join()
+def run_test():
+    try:
+        processes = []
+        for i in range(num_processes):
+            cmd = get_hccl_demo_command(i)
+            processes.append(cmd)
+
+        pool = Pool(processes=test_params["nranks"])
+        results = pool.imap_unordered(run_process, processes)
+
+        for res in results:
+            if res != 0:
+                print("One of the hccl_test processes failed, terminating hccl demo.")
+                pool.close()
+                pool.terminate()
+                pool.join()
+                os.killpg(0, signal.SIGTERM)
+                exit_demo(os.EX_DATAERR)
+                break
+        pool.close()
+        pool.join()
+    except subprocess.SubprocessError as e:
+        print("Exception in run_test(): {} Processes: ({})".format(e, str(processes)))
+
+def main():
+    try:
+        mpi_args = handle_args()
+        print_log("Printing test parameters:")
+        print_log(test_params)
+        read_settings()
+        result = handle_affinity(mpi_args)
+
+        if result != 0:
+            print("Affinity settings failed. Exiting. . .")
+            exit_demo(result)
+
+        # Create the test executable if not found
+        if not os.path.exists(demo_exe):
+            result = handle_make(mpi_args)
+
+            if result != 0:
+                print("Build failed. Exiting. . .")
+                exit_demo(result)
+
+        if mpi_mode:
+            run_mpi_test(mpi_args)
+        else:
+            run_test()
+
+    except Exception as e:
+        print("Exception in main(): {}".format(e))
 
 if __name__ == '__main__':
     main()
