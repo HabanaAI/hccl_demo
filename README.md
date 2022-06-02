@@ -22,8 +22,15 @@ Copyright (c) 2022 Habana Labs, Ltd.<br />
 SPDX-License-Identifier: Apache-2.0
 
 ## Build
-The Python wrapper builds and cleans the project.<br />
-Alternatively, running the 'make' command also builds the project.<br />
+The Python wrapper builds and cleans the project (for cleaning please use "-clean").<br />
+Alternatively, the project can be built using the following command:<br />
+```
+make
+```
+For building the project with MPI:<br />
+```
+MP1=1 make
+```
 By default, the demo is built with affinity configuration.<br />
 When switching between MPI and non MPI modes, please remember to run with "-clean".
 
@@ -46,6 +53,9 @@ When switching between MPI and non MPI modes, please remember to run with "-clea
     NSOCK_PERTHREAD  - Number of sockets per thread
     HCCL_OVER_TCP    - 1 to use TCP between servers, 0 to use scaleout nics
     HCCL_OVER_OFI    - 1 to use OFI between servers, 0 to use scaleout nics
+
+    Please notice that the flags HCCL_OVER_TCP, HCCL_OVER_OFI can not be enabled at the same time.
+    Both of these flags are optional (since autodetection is supported).
 
 ## Run
 
