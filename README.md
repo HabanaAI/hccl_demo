@@ -5,9 +5,10 @@ based Scale out or host NIC Scale out. Host NIC Scale out is achieved using TCP 
 The following list supported collective communication:
 1. All_reduce
 2. All_gather
-3. Reduce_scatter
-4. Broadcast
-5. Reduce
+3. All2All
+4. Reduce_scatter
+5. Broadcast
+6. Reduce
 
 Send/Recv is the supported point to point communication.
 
