@@ -347,7 +347,7 @@ void describe_stat(const string&          stat_name,
 }
 
 hcclResult_t send_recv_test(
-    void* out_dev_ptr, const void* input_dev_ptr, size_t count, hcclComm_t comm, hcclStream_t stream, int peerRank)
+    void* out_dev_ptr, const void* input_dev_ptr, size_t count, hcclComm_t comm, synStreamHandle stream, int peerRank)
 {
     hcclGroupStart();
 
@@ -771,6 +771,97 @@ int main()
                           stat,
                           data_size,
                           all_gather_factor,
+                          hccl_rank,
+                          demo_data.num_iters,
+                          test_type,
+                          "float");
+        }
+        else if (test_type == "all2all")
+        {
+            double all2all_factor = ((double) (demo_data.nranks - 1)) / ((double) demo_data.nranks);
+
+            // Fill input data, example:
+            // Input        |   Output
+            // G0 G1 G2 G3      G0 G1 G2 G3
+            // 0  2  4  6   =>  0  4  8  12
+            // 1  3  5  7       1  5  9  13
+            // 4  5  8  10      2  6  10 14
+            // 5  6  9  11      3  7  11 15
+            // 8  10 12 14      4  8  12 16
+            // 9  11 13 15      5  9  13 17
+            // 12 14 16 18      6  10 14 18
+            // 13 15 17 19      7  11 15 19
+            uint64_t chunkSize = count / demo_data.nranks;
+            for (uint64_t i = 0; i < count / chunkSize; ++i)
+            {
+                // We want to make sure we use different values on each cell and between ranks,
+                // but we don't want the summation to get too big, that is why we modulo by DATA_ELEMENTS_MAX.
+                for (uint64_t j = 0; j < chunkSize; ++j)
+                {
+                    int val                            = hccl_rank * chunkSize + j + demo_data.nranks * i;
+                    input_host_data[i * chunkSize + j] = (val % DATA_ELEMENTS_MAX);
+                }
+            }
+
+            // Copy from input_host_data_ptr to input_dev_ptr (to be used in benchmark)
+            CHECK_SYNAPSE_STATUS(synMemCopyAsync(demo_data.host_to_device_stream,
+                                                 (uint64_t) input_host_data_ptr,
+                                                 data_size,
+                                                 input_dev_ptr,
+                                                 HOST_TO_DRAM));
+            CHECK_SYNAPSE_STATUS(synStreamSynchronize(demo_data.host_to_device_stream));
+
+            // Run HCCL AlltoAll collective
+            auto stat = benchmark(demo_data, [&]() {
+                CHECK_HCCL_STATUS(hcclAlltoAll((const void*) input_dev_ptr,
+                                               (void*) output_dev_ptr,
+                                               input_host_data.size(),
+                                               hcclFloat32,
+                                               demo_data.hccl_comm,
+                                               demo_data.collective_stream));
+            });
+
+            // Correctness check
+            auto        output_host_data     = vector<float>(input_host_data.size());
+            const void* output_host_data_ptr = reinterpret_cast<void*>(output_host_data.data());
+
+            CHECK_SYNAPSE_STATUS(synHostMap(demo_data.device_handle, data_size, output_host_data_ptr));
+            CHECK_SYNAPSE_STATUS(synMemCopyAsync(demo_data.device_to_host_stream,
+                                                 output_dev_ptr,
+                                                 data_size,
+                                                 (uint64_t) output_host_data_ptr,
+                                                 DRAM_TO_HOST));
+            CHECK_SYNAPSE_STATUS(synStreamSynchronize(demo_data.device_to_host_stream));
+
+            int start = hccl_rank * (count / chunkSize);
+            int expected;
+
+            for (size_t i = 0; i < output_host_data.size(); ++i)
+            {
+                expected = ((start + i) % DATA_ELEMENTS_MAX);
+                if ((float) output_host_data[i] != (float) expected)
+                {
+                    is_ok = false;
+                }
+            }
+
+            log() << "All2All hccl_rank=" << hccl_rank << " size=" << data_size << " <float>"
+                  << " Input Buffer [" << input_host_data[0] << " " << input_host_data[1] << " " << input_host_data[2]
+                  << " " << input_host_data[3] << " ...]"
+                  << " distributed to Output Buffer [" << output_host_data[0] << " " << output_host_data[1] << " "
+                  << output_host_data[2] << " " << output_host_data[3] << " ...]"
+                  << " which is " << (is_ok ? "fine." : "bad.") << endl;
+
+            CHECK_SYNAPSE_STATUS(synHostUnmap(demo_data.device_handle, input_host_data_ptr));
+            CHECK_SYNAPSE_STATUS(synHostUnmap(demo_data.device_handle, output_host_data_ptr));
+
+            // End of correctness check
+
+            describe_stat("hcclAlltoAll(src!=dst, count=" + to_string(input_host_data.size()) +
+                              ", dtype=fp32, iterations=" + to_string(demo_data.num_iters) + ")",
+                          stat,
+                          data_size,
+                          all2all_factor,
                           hccl_rank,
                           demo_data.num_iters,
                           test_type,

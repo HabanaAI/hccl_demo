@@ -40,7 +40,7 @@ mpi_mode = False
 SUCCESS = 0
 ERROR = 1
 
-test_list = ('broadcast', 'all_reduce', 'reduce_scatter', 'all_gather', 'send_recv', 'reduce')
+test_list = ('broadcast', 'all_reduce', 'reduce_scatter', 'all_gather', 'all2all', 'send_recv', 'reduce')
 test_params = {}
 print_log = lambda *x: None
 
