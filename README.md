@@ -52,11 +52,11 @@ When switching between MPI and non MPI modes, please remember to run with "-clea
     HCCL_COMM_ID     - IP of node_id=0 host and an available port, in the format <IP:PORT>
     SOCKET_NTHREADS  - Number of threads to manage TCP sockets
     NSOCK_PERTHREAD  - Number of sockets per thread
-    HCCL_OVER_TCP    - 1 to use TCP between servers, 0 to use scaleout nics
-    HCCL_OVER_OFI    - 1 to use OFI between servers, 0 to use scaleout nics
+    HCCL_OVER_TCP    - 1 to use TCP between servers, 0 (default) to use Gaudi scaleout nics
+    HCCL_OVER_OFI    - 1 to use OFI between servers, 0 (default) to use Gaudi scaleout nics
 
     Please notice that the flags HCCL_OVER_TCP, HCCL_OVER_OFI can not be enabled at the same time.
-    Both of these flags are optional (since autodetection is supported).
+    Both of these flags are optional (since autodetection is supported) and should not be used when Gaudi scaleout nics connected.
 
 ## Run
 
