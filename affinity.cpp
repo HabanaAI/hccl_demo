@@ -140,7 +140,7 @@ int setAutoAffinity(int moduleID)
 
     if (sched_setaffinity(getpid(), sizeof(cpu_set_t), &mask) < 0)
     {
-        cout << "sched_setaffinity() failed. Exit" << endl;
+        cout << "sched_setaffinity() failed" << endl;
         return 1;
     }
     return 0;
@@ -173,7 +173,7 @@ int setCustomAffinity(int moduleID, int numSockets, int numCoresPerSocket, int n
 
     if (sched_setaffinity(pid, sizeof(cpu_set_t), &set) < 0)
     {
-        cout << "sched_setaffinity() failed. Exit" << endl;
+        cout << "sched_setaffinity() failed" << endl;
         return 1;
     }
     return 0;
@@ -187,12 +187,33 @@ int setBestEffortAffinity(int moduleID)
     string cmd       = "lscpu|grep -E ' per core:| per socket:|Socket'|awk '{print $NF}' > " + file_name;
 
     system(cmd.c_str());
-    ifstream file(file_name);
-    while (file >> numHT >> numCoresPerSocket >> numSockets)
+    ifstream affinity_output_file;
+    affinity_output_file.open(file_name);
+    if (affinity_output_file.is_open())
     {
+        while (affinity_output_file >> numHT >> numCoresPerSocket >> numSockets)
+        {
+        }
+        affinity_output_file.close();
     }
-    remove(file_name.c_str());
+    else
+    {
+        cout << "Error opening file " << file_name << endl;
+        return 1;
+    }
+    if (remove(file_name.c_str()) != 0)
+    {
+        cout << "Error removing file " << file_name << endl;
+        return 1;
+    }
 
+    if (numSockets == 0 || numCoresPerSocket == 0 || numHT == 0)
+    {
+        cout << "The settings for best effort affinity are incorrect. Number of sockets: " << numSockets
+             << ",  Number of cores per socket: " << numCoresPerSocket << ", Number of hyper threads: " << numHT
+             << ". Please use custom affinity." << endl;
+        return 1;
+    }
     return setCustomAffinity(moduleID, numSockets, numCoresPerSocket, numHT);
 }
 
@@ -203,8 +224,7 @@ void printAffinity(int moduleID)
 
     if (sched_getaffinity(getpid(), sizeof(cpu_set_t), &mask) < 0)
     {
-        cout << "sched_getaffinity() failed. Exit" << endl;
-        exit(1);
+        cout << "sched_getaffinity() failed" << endl;
     }
     nproc = sysconf(_SC_NPROCESSORS_ONLN);
     cout << "moduleID=" << moduleID << " affinity set to = ";
@@ -217,7 +237,6 @@ void printAffinity(int moduleID)
 
 int setupAffinity(int device_module_id)
 {
-    //Process affinitty logic
     if (!get_disable_proc_affinity_env())
     {
         if (get_num_sockets() && get_num_cores_per_socket() && get_num_ht())
@@ -225,8 +244,8 @@ int setupAffinity(int device_module_id)
             cout << "Setting custom affinity" << endl;
             if (setCustomAffinity(device_module_id, get_num_sockets(), get_num_cores_per_socket(), get_num_ht()) != 0)
             {
-                cout << "Failed to set affinty, exiting!" << endl;
-                exit(1);
+                cout << "Failed to set custom affinty" << endl;
+                return get_enforce_proc_affinity_env();
             }
         }
         else if (get_best_effort_proc_affinity_env())
@@ -234,8 +253,8 @@ int setupAffinity(int device_module_id)
             cout << "Setting best effort affinity" << endl;
             if (setBestEffortAffinity(device_module_id) != 0)
             {
-                cout << "Best effort affinity failed, exiting" << endl;
-                exit(1);
+                cout << "Failed to set best effort affinty" << endl;
+                return get_enforce_proc_affinity_env();
             }
         }
         else
@@ -246,7 +265,7 @@ int setupAffinity(int device_module_id)
                 if (get_enforce_proc_affinity_env())
                 {
                     cout << "Setting auto-affinity failed, --enforce-affinity is on, exiting!" << endl;
-                    exit(1);
+                    return 1;
                 }
                 else
                 {
