@@ -36,22 +36,25 @@ By default, the demo is built with affinity configuration.<br />
 When switching between MPI and non MPI modes, please remember to run with "-clean".
 
 ## Python wrapper arguments
-    --nranks          - int, Number of ranks participating in the demo
-    --ranks_per_node  - int, Number of ranks participating in the demo for current node
-    --node_id         - int, ID of the running host. Each host should have unique id between 0-num_nodes
-    --test            - str, Which hccl test to run (for example: broadcast/all_reduce) (default: broadcast)
-    --size            - str, Data size in units of G,M,K,B or no unit (default: 33554432 Bytes)
-    --loop            - int, Number of iterations (default: 10)
-    --test_root       - int, Index of root rank for broadcast and reduce tests
-    --csv_path        - str, Path to a file for results output
-    -mpi              - Use MPI for managing execution
-    -clean            - Clear old executable and compile a new one
-    -l                - Display a list of available tests
+    --nranks           - int, Number of ranks participating in the demo
+    --ranks_per_node   - int, Number of ranks participating in the demo for current node
+    --node_id          - int, ID of the running host. Each host should have unique id between 0-num_nodes
+    --test             - str, Which hccl test to run (for example: broadcast/all_reduce) (default: broadcast)
+    --size             - str, Data size in units of G,M,K,B or no unit (default: 33554432 Bytes)
+    --loop             - int, Number of iterations (default: 10)
+    --test_root        - int, Index of root rank for broadcast and reduce tests
+    --csv_path         - str, Path to a file for results output
+    -mpi               - Use MPI for managing execution
+    -clean             - Clear old executable and compile a new one
+    -list              - Display a list of available tests
+    -help              - Display detailed help for HCCL demo in a form of docstring
+    -ignore_mpi_errors - Ignore generic MPI errors
+    -no_color          - Disable the usage of colors in console output
 
 ## Environment variables
     HCCL_COMM_ID     - IP of node_id=0 host and an available port, in the format <IP:PORT>
-    SOCKET_NTHREADS  - Number of threads to manage TCP sockets
-    NSOCK_PERTHREAD  - Number of sockets per thread
+    SOCKET_NTHREADS  - Number of threads to manage TCP sockets (default 2)
+    NSOCK_PERTHREAD  - Number of sockets per thread (default 3)
     HCCL_OVER_TCP    - 1 to use TCP between servers, 0 (default) to use Gaudi scaleout nics
     HCCL_OVER_OFI    - 1 to use OFI between servers, 0 (default) to use Gaudi scaleout nics
 

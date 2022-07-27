@@ -289,6 +289,20 @@ int get_nranks()
     return test_nranks;
 }
 
+int verify_mpi_configuration()
+{
+    bool mpi_enabled = false;
+#if MPI_ENABLED
+    mpi_enabled = true;
+#endif  // MPI_ENABLED
+
+    static auto mpi_requested = false;
+    char*       env_value     = getenv("HCCL_DEMO_MPI_REQUESTED");
+    mpi_requested             = (env_value != nullptr) ? atoi(env_value) : mpi_requested;
+
+    return mpi_requested ^ mpi_enabled;
+}
+
 int get_hccl_rank()
 {
 #if MPI_ENABLED
@@ -366,6 +380,13 @@ int main()
     {
         log() << "Running HCCL Demo :: A simple program demonstrating HCCL usage from C++" << endl;
 
+        if (verify_mpi_configuration())
+        {
+            throw runtime_error {
+                "HCCL demo compilation and user instruction regarding run type (MPI/pure) are non compatible. \nPlease "
+                "consider to build the demo with the correct instructions or run with -clean"};
+        }
+
 #if MPI_ENABLED
         log() << "MPI enabled. Make sure that HCCL demo is launched with mpirun." << std::endl;
         // Initialize the Open MPI execution context.
@@ -385,9 +406,11 @@ int main()
         CHECK_SYNAPSE_STATUS(synDeviceAcquireByModuleId(&demo_data.device_handle, device_module_id));
 
 #if AFFINITY_ENABLED
-        setupAffinity(device_module_id);
+        if (setupAffinity(device_module_id) != 0)
+        {
+            throw runtime_error {"Affinity setting for HCCL demo failed."};
+        }
 #endif
-
         // Create Streams
         CHECK_SYNAPSE_STATUS(
             synStreamCreate(&demo_data.collective_stream, demo_data.device_handle, STREAM_TYPE_NETWORK_COLLECTIVE, 0));
@@ -1047,6 +1070,7 @@ int main()
 #if MPI_ENABLED
         CHECK_MPI_STATUS(MPI_Finalize());
 #endif  // MPI_ENABLED
+
         if (!is_ok)
         {
             throw runtime_error {"Collective operation has failed on corretness."};
@@ -1054,7 +1078,7 @@ int main()
     }
     catch (const exception& ex)
     {
-        log() << "error: " << ex.what() << endl;
+        log() << "HCCL demo error: " << ex.what() << endl;
         return -1;
     }
     return 0;

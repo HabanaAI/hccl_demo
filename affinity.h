@@ -10,4 +10,4 @@ int  setAutoAffinity(int moduleID);
 int  setCustomAffinity(int moduleID, int numSockets, int numCoresPerSocket, int numHT);
 int  setBestEffortAffinity(int moduleID);
 void printAffinity(int moduleID);
-void setupAffinity(int moduleID);
+int  setupAffinity(int moduleID);
