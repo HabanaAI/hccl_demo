@@ -1,6 +1,6 @@
 # HCCL Demo
 HCCL demo is a program that demonstrates HCCL usage and supports communication via Gaudi<br />
-based Scale out or host NIC Scale out. Host NIC Scale out is achieved using TCP and OFI.<br />
+based Scale out or host NIC Scale out. Host NIC Scale out is achieved using OFI.<br />
 
 The following list supported collective communication:
 1. All_reduce
@@ -53,13 +53,9 @@ When switching between MPI and non MPI modes, please remember to run with "-clea
 
 ## Environment variables
     HCCL_COMM_ID     - IP of node_id=0 host and an available port, in the format <IP:PORT>
-    SOCKET_NTHREADS  - Number of threads to manage TCP sockets (default 2)
-    NSOCK_PERTHREAD  - Number of sockets per thread (default 3)
-    HCCL_OVER_TCP    - 1 to use TCP between servers, 0 (default) to use Gaudi scaleout nics
     HCCL_OVER_OFI    - 1 to use OFI between servers, 0 (default) to use Gaudi scaleout nics
 
-    Please notice that the flags HCCL_OVER_TCP, HCCL_OVER_OFI can not be enabled at the same time.
-    Both of these flags are optional (since autodetection is supported) and should not be used when Gaudi scaleout nics connected.
+    Please notice that the flag HCCL_OVER_OFI is optional (since autodetection is supported) and should not be used when Gaudi scaleout nics connected.
 
 ## Run
 
@@ -69,7 +65,7 @@ When using any operating system that have Linux kernel version between 5.9.x and
 
 Run the execution command
 
-    HCCL_COMM_ID=<IP:PORT> HCCL_OVER_TCP={0,1} ./run_hcl_demo.py [options]
+    HCCL_COMM_ID=<IP:PORT> ./run_hcl_demo.py [options]
 
 ## Results
 Results are printed to the display<br />
@@ -80,7 +76,7 @@ Results can also be printed to output file by using --csv_path <path_to_file>
 
 Configuration: One server with 8 ranks, 32 MB size, all_reduce collective, 1000 iterations
 
-    HCCL_COMM_ID=127.0.0.1:5555 HCCL_OVER_TCP=0 python3 run_hccl_demo.py --nranks 8 --node_id 0 --size 32m --test all_reduce --loop 1000 --ranks_per_node 8
+    HCCL_COMM_ID=127.0.0.1:5555 python3 run_hccl_demo.py --nranks 8 --node_id 0 --size 32m --test all_reduce --loop 1000 --ranks_per_node 8
 
 Output example:
 
@@ -99,22 +95,22 @@ Output example:
 
 Different options for running one server with 8 ranks and size of 32 MB:
 
-    HCCL_COMM_ID=127.0.0.1:5555 HCCL_OVER_TCP=0 python3 run_hccl_demo.py --nranks 8 --node_id 0 --size 32m --test all_reduce
-    HCCL_COMM_ID=127.0.0.1:5555 HCCL_OVER_TCP=0 python3 run_hccl_demo.py --nranks 8 --node_id 0 --size 32M --test all_reduce
-    HCCL_COMM_ID=127.0.0.1:5555 HCCL_OVER_TCP=0 python3 run_hccl_demo.py --nranks 8 --node_id 0 --size 33554432 --test all_reduce
-    HCCL_COMM_ID=127.0.0.1:5555 HCCL_OVER_TCP=0 python3 run_hccl_demo.py --nranks 8 --node_id 0 --size 33554432b --test all_reduce
-    HCCL_COMM_ID=127.0.0.1:5555 HCCL_OVER_TCP=0 python3 run_hccl_demo.py --nranks 8 --node_id 0 --size 33554432B --test all_reduce
+    HCCL_COMM_ID=127.0.0.1:5555 python3 run_hccl_demo.py --nranks 8 --node_id 0 --size 32m --test all_reduce
+    HCCL_COMM_ID=127.0.0.1:5555 python3 run_hccl_demo.py --nranks 8 --node_id 0 --size 32M --test all_reduce
+    HCCL_COMM_ID=127.0.0.1:5555 python3 run_hccl_demo.py --nranks 8 --node_id 0 --size 33554432 --test all_reduce
+    HCCL_COMM_ID=127.0.0.1:5555 python3 run_hccl_demo.py --nranks 8 --node_id 0 --size 33554432b --test all_reduce
+    HCCL_COMM_ID=127.0.0.1:5555 python3 run_hccl_demo.py --nranks 8 --node_id 0 --size 33554432B --test all_reduce
 ### Running HCCL demo on 2 servers (16 Gaudi devices)
 
-Configuration: Host NIC Scale out using TCP, 16 ranks, 32 MB size, all_reduce collective, 1000 iterations
+Configuration: Host NIC Scale out using OFI, 16 ranks, 32 MB size, all_reduce collective, 1000 iterations
 
 First server command:
 
-    HCCL_COMM_ID=10.111.12.234:5555 HCCL_OVER_TCP=1 python3 run_hccl_demo.py --test all_reduce --nranks 16 --loop 1000 --node_id 0 --size 32m --ranks_per_node 8
+    HCCL_COMM_ID=10.111.12.234:5555 HCCL_OVER_OFI=1 python3 run_hccl_demo.py --test all_reduce --nranks 16 --loop 1000 --node_id 0 --size 32m --ranks_per_node 8
 
 Second server command:
 
-    HCCL_COMM_ID=10.111.12.234:5555 HCCL_OVER_TCP=1 python3 run_hccl_demo.py --test all_reduce --nranks 16 --loop 1000 --node_id 1 --size 32m --ranks_per_node 8
+    HCCL_COMM_ID=10.111.12.234:5555 HCCL_OVER_OFI=1 python3 run_hccl_demo.py --test all_reduce --nranks 16 --loop 1000 --node_id 1 --size 32m --ranks_per_node 8
 
 First server output:
 
@@ -169,17 +165,17 @@ Output example:
 
 ### Running HCCL demo on 2 servers (16 Gaudi devices)
 
-Configuration: Host NIC Scale out using TCP, 16 ranks, 32 MB size, all_reduce collective, 1000 iterations
+Configuration: Host NIC Scale out using OFI, 16 ranks, 32 MB size, all_reduce collective, 1000 iterations
 
 First option using MPI hostfile:
 
-    python3 run_hccl_demo.py --test all_reduce --loop 1000 --size 32m -mpi --hostfile hostfile.txt -x HCCL_OVER_TCP=1
+    python3 run_hccl_demo.py --test all_reduce --loop 1000 --size 32m -mpi --hostfile hostfile.txt -x HCCL_OVER_OFI=1
 
 * For MPI --hostfile option, please refer to: https://www.open-mpi.org/faq/?category=running#mpirun-hostfile
 
 Second option using MPI host:
 
-    python3 run_hccl_demo.py --test all_reduce --loop 1000 --size 32m -mpi --host 10.111.12.234,10.111.12.235 -x HCCL_OVER_TCP=1
+    python3 run_hccl_demo.py --test all_reduce --loop 1000 --size 32m -mpi --host 10.111.12.234,10.111.12.235 -x HCCL_OVER_OFI=1
 
 * For MPI --host option, please refer to: https://www.open-mpi.org/faq/?category=running#mpirun-host
 
