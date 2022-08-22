@@ -26,6 +26,10 @@ COPY README.md /root/tests/hccl_demo
 COPY run_hccl_demo.py /root/tests/hccl_demo
 COPY vault.key /root/tests/hccl_demo
 
+#Setup test specific environments
+ENV PATH "$PATH:/root/tests/hccl_demo"
+ENV PYTHONPATH "$PYTHONPATH:/root/tests/hccl_demo"
+
 #Install Synapse runtime packages - if required
 RUN echo "deb https://vault.habana.ai/artifactory/debian `lsb_release -c | awk '{print $2}'` main" > /etc/apt/sources.list.d/artifactory.list
 RUN apt-key add /root/tests/hccl_demo/vault.key
