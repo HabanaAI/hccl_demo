@@ -1,5 +1,3 @@
-# we use image which already have hcl/synapse setup
-# image originally taken from: artifactory-kfs.habana-labs.com/docker-local/${_synapse_version}/ubuntu${_os_version}/habanalabs/tensorflow-installer-tf-cpu-${_tf_version}:${_synapse_version}-${_synapse_build}
 # see build_and_run.sh for details
 
 ARG base_image
