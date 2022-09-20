@@ -160,7 +160,7 @@ class DemoTest:
                 if self.nranks < 1:
                     self.exit_demo(f'[validate_arguments] Argument nranks was set to: {self.nranks}')
                 if self.mpi_args:
-                    self.exit_demo(f'[validate_arguments] HCCL demo is running in pure more, therefore the following arguments cannot be used: {self.mpi_args}')
+                    self.exit_demo(f'[validate_arguments] The option "--mpi" was not used, therefore the following arguments cannot be used: {self.mpi_args}')
                 self.number_of_processes = min(self.ranks_per_node, self.nranks)
                 self.log_debug(f'Number of processes to be used is: {self.number_of_processes}')
             else:

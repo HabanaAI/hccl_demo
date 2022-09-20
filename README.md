@@ -30,10 +30,30 @@ make
 ```
 For building the project with MPI:<br />
 ```
-MP1=1 make
+MPI=1 make
 ```
 By default, the demo is built with affinity configuration.<br />
 When switching between MPI and non MPI modes, please remember to run with "-clean".
+
+## Build HCCL OFI wrapper
+To use libfabric library, HCCL OFI wrapper should be built.<br />
+Please follow the instructions below:<br />
+1. Clone wrapper from https://github.com/HabanaAI/hccl_ofi_wrapper
+    ```
+    git clone https://github.com/HabanaAI/hccl_ofi_wrapper.git
+    ```
+2. Set LIBFABRIC_ROOT: export LIBFABRIC_ROOT=<Libfabric root on server>
+    ```
+    export LIBFABRIC_ROOT=/tmp/libfabric-1.15.0
+    ```
+3. Build wrapper (from the wrapper directory)
+    ```
+    make
+    ```
+4. Copy wrapper to /usr/lib/habanalabs/
+    ```
+    cp libhccl_ofi_wrapper.so /usr/lib/habanalabs/libhccl_ofi_wrapper.so
+    ```
 
 ## Python wrapper arguments
     --nranks           - int, Number of ranks participating in the demo
