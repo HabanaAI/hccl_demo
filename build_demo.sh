@@ -7,11 +7,11 @@
 
 if [ "$MPI_ENABLED" == "1" ]; then
    if [ "$OMPI_COMM_WORLD_LOCAL_RANK" == "0" ]; then
+      echo "Building HCCL demo with MPI"
       MPI=1 make $1
-      echo "Build script with MPI has finished successfully"
    fi
 else
+   echo "Building HCCL demo"
    make $1
-   echo "Build script has finished successfully"
 fi
-exit 0
+exit $?
