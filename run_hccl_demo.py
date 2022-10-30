@@ -651,6 +651,8 @@ class DemoTest:
 
 if __name__ == '__main__':
     try:
+        # Create new process group
+        os.setpgrp()
         DemoTestObj = DemoTest()
         DemoTestObj.prepare_demo()
         DemoTestObj.run_demo()

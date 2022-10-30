@@ -44,7 +44,7 @@ Please follow the instructions below:<br />
     ```
 2. Set LIBFABRIC_ROOT: export LIBFABRIC_ROOT=<Libfabric root on server>
     ```
-    export LIBFABRIC_ROOT=/tmp/libfabric-1.15.0
+    export LIBFABRIC_ROOT=/tmp/libfabric-1.16.0
     ```
 3. Build wrapper (from the wrapper directory)
     ```
@@ -76,6 +76,16 @@ Please follow the instructions below:<br />
     HCCL_OVER_OFI    - 1 to use OFI between servers, 0 (default) to use Gaudi scaleout nics
 
     Please notice that the flag HCCL_OVER_OFI is optional (since autodetection is supported) and should not be used when Gaudi scaleout nics connected.
+
+## EFA Peer-Direct
+Peer direct enables direct fabric access to Gaudi memory.
+This mode is supported with EFA provider if the following conditions are met:
+1. OFI version 1.16.0 (or higher)
+2. Kernel version 5.12 (or higher)
+3. The following environment variables are set:
+   HCCL_OVER_OFI=1
+   HCCL_PEER_DIRECT=1
+   FI_EFA_USE_DEVICE_RDMA=1
 
 ## Run
 
@@ -195,7 +205,7 @@ First option using MPI hostfile:
 
 Second option using MPI host:
 
-    python3 run_hccl_demo.py --test all_reduce --loop 1000 --size 32m -mpi --host 10.111.12.234,10.111.12.235 -x HCCL_OVER_OFI=1
+    python3 run_hccl_demo.py --test all_reduce --loop 1000 --size 32m -mpi --host 10.111.12.234:8,10.111.12.235:8 -x HCCL_OVER_OFI=1
 
 * For MPI --host option, please refer to: https://www.open-mpi.org/faq/?category=running#mpirun-host
 
