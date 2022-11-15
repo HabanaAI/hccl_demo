@@ -31,7 +31,6 @@
 #define DEFAULT_TEST_SIZE 33554432
 #define DEFAULT_TEST_LOOP 10
 #define DEFAULT_BOX_SIZE  8
-#define NUMBER_OF_WARMUPS 100
 
 #if MPI_ENABLED
 // Open MPI (v4.0.2)
@@ -135,16 +134,10 @@ hcclResult_t get_avg_duration(hccl_demo_data& demo_data, hccl_demo_stats& stat)
 
 hccl_demo_stats benchmark(hccl_demo_data& demo_data, const function<void()>& fn)
 {
-    // Warmup run
     hccl_demo_stats stat;
-    auto            num_warmup_iters = size_t {NUMBER_OF_WARMUPS};
 
-    for (size_t iter = 0; iter < num_warmup_iters; ++iter)
-    {
-        fn();
-    }
-
-    CHECK_SYNAPSE_STATUS(synStreamSynchronize(demo_data.collective_stream));
+    // Warmup to sync all the gaudis on the device.
+    hcclBarrier(demo_data.hccl_comm, demo_data.collective_stream);
 
     // Actual iterations
     auto start_time = Clock::now();
