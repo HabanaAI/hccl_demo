@@ -224,14 +224,14 @@ int get_demo_test_root()
     return test_root;
 }
 
-int get_demo_test_size()
+uint64_t get_demo_test_size()
 {
     static bool is_cached = false;
-    static auto test_size = DEFAULT_TEST_SIZE;
+    static uint64_t test_size = DEFAULT_TEST_SIZE;
     if (!is_cached)
     {
         char* env_value = getenv("HCCL_DEMO_TEST_SIZE");
-        test_size       = (env_value != nullptr) ? atoi(env_value) : test_size;
+        test_size       = (env_value != nullptr) ? strtoull(env_value, NULL, 0) : test_size;
         is_cached       = true;
     }
     return test_size;
