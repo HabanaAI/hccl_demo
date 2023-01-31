@@ -420,6 +420,8 @@ class DemoTest:
         try:
             output = subprocess.run(['which', 'mpirun'], stdout=subprocess.PIPE)
             result = str(output.stdout.decode('utf-8').strip())
+            if not result:
+                self.exit_demo(f'[get_mpi_prefix] MPI is not installed. Please install MPI or use HCCL demo in pure mode.')
             self.log_debug(f'MPI prefix is: {result}')
             return result
         except Exception as e:
