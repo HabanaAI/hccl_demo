@@ -10,7 +10,7 @@ The following list supported collective communication:
 5. Broadcast
 6. Reduce
 
-Send/Recv is the supported point to point communication.
+Send/Recv is the supported point to point communication. It illustrates exchanging data between pairs of Gaudis within the same box.
 
 Supported from v1.3.0 and above.
 
@@ -144,9 +144,6 @@ Please follow the instructions below:<br />
 
 ## Environment variables
     HCCL_COMM_ID     - IP of node_id=0 host and an available port, in the format <IP:PORT>
-    HCCL_OVER_OFI    - 1 to use OFI between servers, 0 (default) to use Gaudi scaleout nics
-
-    Please notice that the flag HCCL_OVER_OFI is optional (since autodetection is supported) and should not be used when Gaudi scaleout nics connected.
 
 ## EFA Peer-Direct
 Peer direct enables direct fabric access to Gaudi memory.
@@ -154,9 +151,8 @@ This mode is supported with EFA provider if the following conditions are met:
 1. OFI version 1.16.0 (or higher)
 2. Kernel version 5.12 (or higher)
 3. The following environment variables are set:
-   HCCL_OVER_OFI=1
-   HCCL_PEER_DIRECT=1
    FI_EFA_USE_DEVICE_RDMA=1
+   RDMAV_FORK_SAFE=1
 
 ## Run
 
@@ -207,11 +203,11 @@ Configuration: Host NIC Scale out using OFI, 16 ranks, 32 MB size, all_reduce co
 
 First server command:
 
-    HCCL_COMM_ID=10.111.12.234:5555 HCCL_OVER_OFI=1 python3 run_hccl_demo.py --test all_reduce --nranks 16 --loop 1000 --node_id 0 --size 32m --ranks_per_node 8
+    HCCL_COMM_ID=10.111.12.234:5555 python3 run_hccl_demo.py --test all_reduce --nranks 16 --loop 1000 --node_id 0 --size 32m --ranks_per_node 8
 
 Second server command:
 
-    HCCL_COMM_ID=10.111.12.234:5555 HCCL_OVER_OFI=1 python3 run_hccl_demo.py --test all_reduce --nranks 16 --loop 1000 --node_id 1 --size 32m --ranks_per_node 8
+    HCCL_COMM_ID=10.111.12.234:5555 python3 run_hccl_demo.py --test all_reduce --nranks 16 --loop 1000 --node_id 1 --size 32m --ranks_per_node 8
 
 First server output:
 
@@ -270,13 +266,13 @@ Configuration: Host NIC Scale out using OFI, 16 ranks, 32 MB size, all_reduce co
 
 First option using MPI hostfile:
 
-    python3 run_hccl_demo.py --test all_reduce --loop 1000 --size 32m -mpi --hostfile hostfile.txt -x HCCL_OVER_OFI=1
+    python3 run_hccl_demo.py --test all_reduce --loop 1000 --size 32m -mpi --hostfile hostfile.txt
 
 * For MPI --hostfile option, please refer to: https://www.open-mpi.org/faq/?category=running#mpirun-hostfile
 
 Second option using MPI host:
 
-    python3 run_hccl_demo.py --test all_reduce --loop 1000 --size 32m -mpi --host 10.111.12.234:8,10.111.12.235:8 -x HCCL_OVER_OFI=1
+    python3 run_hccl_demo.py --test all_reduce --loop 1000 --size 32m -mpi --host 10.111.12.234:8,10.111.12.235:8
 
 * For MPI --host option, please refer to: https://www.open-mpi.org/faq/?category=running#mpirun-host
 
