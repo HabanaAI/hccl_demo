@@ -1,8 +1,15 @@
 # HCCL Demo
 HCCL demo is a program that demonstrates HCCL usage and supports communication via Gaudi<br />
-based Scale out or host NIC Scale out. Host NIC Scale out is achieved using OFI.<br />
+based scale-out or Host NIC scale-out.
 
-The following list supported collective communication:
+This README provides HCCL demo setup and usage as well as example run commands. In<br />
+addition, it provides further setup steps required when using Host NIC Scale out.<br />  
+Host NIC Scale out is achieved using OFI. [Host NIC Scale-Out Setup](#Host-NIC-Scale-Out-Setup)<br /> 
+section details the steps required to download, install and build OFI. It also provides<br />  
+the required environment variables to run Host NIC scale-out with EFA Peer Direct.<br />
+
+## Supported Collective Operations
+The following lists the supported collective operations:
 1. All_reduce
 2. All_gather
 3. All2All
@@ -12,7 +19,6 @@ The following list supported collective communication:
 
 Send/Recv is the supported point to point communication. It illustrates exchanging data between pairs of Gaudis within the same box.
 
-Supported from v1.3.0 and above.
 
 ## Contents
 1. C++ project which includes all tests and a makefile
@@ -35,54 +41,55 @@ MPI=1 make
 By default, the demo is built with affinity configuration.<br />
 When switching between MPI and non MPI modes, please remember to run with "-clean".
 
-## Download and install libfabric
+## Host NIC Scale-Out Setup
+### Download and Install libfabric
 libfabric should be downloaded and installed in order to use it.<br />
 Please follow the instructions below:<br />
-1.  Define required version to be installed
+1.  Define required version to be installed:
     ```
     export REQUIRED_VERSION=1.16.1
     ```
-2.  Download libfabric tarball from: https://github.com/ofiwg/libfabric/releases
+2.  Download libfabric tarball from https://github.com/ofiwg/libfabric/releases:
     ```
     wget  https://github.com/ofiwg/libfabric/releases/download/v$REQUIRED_VERSION/libfabric-$REQUIRED_VERSION.tar.bz2 -P /tmp/libfabric`
     ```
-3.  Store temporary download directory in stack
+3.  Store temporary download directory in stack:
     ```
     pushd /tmp/libfabric
     ```
-4.  Open the file
+4.  Open the file:
     ```
     tar -xf libfabric-$REQUIRED_VERSION.tar.bz2
     ```
-5.  Define libfabric root location
+5.  Define libfabric root location:
     ```
     export LIBFABRIC_ROOT=<libFabric library location>
     ```
-6.  Create folder for libfabric
+6.  Create folder for libfabric:
     ```
     mkdir -p ${LIBFABRIC_ROOT}
     ```
-7.  Change permissions for libfabric folder
+7.  Change permissions for libfabric folder:
     ```
     chmod 777 ${LIBFABRIC_ROOT}
     ```
-8.  Change directory to libfabric folder created after opening tar file
+8.  Change directory to libfabric folder created after opening tar file:
     ```
     cd libfabric-$REQUIRED_VERSION/
     ```
-9.  Configure libfabric
+9.  Configure libfabric:
     ```
     ./configure --prefix=$LIBFABRIC_ROOT --enable-debug
     ```
-10. Build and install libfabric
+10. Build and install libfabric:
     ```
     make -j 32 && make install
     ```
-11. Remove temporary download directory from stack
+11. Remove temporary download directory from stack:
     ```
     popd
     ```
-12. Delete temporary download directory
+12. Delete temporary download directory:
     ```
     rm -rf /tmp/libfabric
     ```
@@ -94,30 +101,30 @@ Please follow the instructions below:<br />
     Installation can be verified by running: `fi_info --version`.<br />
     For more information please see: https://github.com/ofiwg/libfabric
 
-## Build HCCL OFI wrapper
+### Build HCCL OFI wrapper
 To use libfabric library, HCCL OFI wrapper should be built.<br />
 Please follow the instructions below:<br />
-1. Clone wrapper from https://github.com/HabanaAI/hccl_ofi_wrapper
+1. Clone wrapper from https://github.com/HabanaAI/hccl_ofi_wrapper:
    ```
    git clone https://github.com/HabanaAI/hccl_ofi_wrapper.git
    ```
-2. Define LIBFABRIC_ROOT
+2. Define LIBFABRIC_ROOT:
    ```
    export LIBFABRIC_ROOT=/tmp/libfabric-1.16.0
    ```
-3. Change directory to hccl_ofi_wrapper
+3. Change directory to hccl_ofi_wrapper:
    ```
    cd hccl_ofi_wrapper
    ```
-4. Build wrapper
+4. Build wrapper:
    ```
    make
    ```
-5. Copy wrapper to /usr/lib/habanalabs/
+5. Copy wrapper to /usr/lib/habanalabs/:
    ```
    cp libhccl_ofi_wrapper.so /usr/lib/habanalabs/libhccl_ofi_wrapper.so
    ```
-6. Run ldconfig utility
+6. Run ldconfig utility:
    ```
    ldconfig
    ```
@@ -126,7 +133,16 @@ Please follow the instructions below:<br />
    export LD_LIBRARY_PATH=$LD_LIBRARY_PATH:/usr/lib/habanalabs/
    ```
 
-## Python wrapper arguments
+### EFA Peer-Direct
+Peer direct enables direct fabric access to Gaudi memory.
+This mode is supported with EFA provider if the following conditions are met:
+1. OFI version 1.16.0 (or higher)
+2. Kernel version 5.12 (or higher)
+3. The following environment variables are set:
+   FI_EFA_USE_DEVICE_RDMA=1
+   RDMAV_FORK_SAFE=1
+
+## Python Wrapper Arguments
     --nranks           - int, Number of ranks participating in the demo
     --ranks_per_node   - int, Number of ranks participating in the demo for current node
     --node_id          - int, ID of the running host. Each host should have unique id between 0-num_nodes
@@ -142,21 +158,13 @@ Please follow the instructions below:<br />
     -ignore_mpi_errors - Ignore generic MPI errors
     -no_color          - Disable the usage of colors in console output
 
-## Environment variables
+## Environment Variables
     HCCL_COMM_ID     - IP of node_id=0 host and an available port, in the format <IP:PORT>
 
-## EFA Peer-Direct
-Peer direct enables direct fabric access to Gaudi memory.
-This mode is supported with EFA provider if the following conditions are met:
-1. OFI version 1.16.0 (or higher)
-2. Kernel version 5.12 (or higher)
-3. The following environment variables are set:
-   FI_EFA_USE_DEVICE_RDMA=1
-   RDMAV_FORK_SAFE=1
 
-## Run
+## Run HCCL Demo
 
-When using any operating system that have Linux kernel version between 5.9.x and 5.16.x. Currently this is applicable to Ubuntu20 and Amazon Linux AMIs:
+Set the below when using any operating system that has Linux kernel version between 5.9.x and 5.16.x. Currently, this is applicable to Ubuntu20 and Amazon Linux AMIs:
 
     echo 0 > /proc/sys/kernel/numa_balancing
 
@@ -169,6 +177,9 @@ Results are printed to the display<br />
 Results can also be printed to output file by using --csv_path <path_to_file>
 
 ## Examples - without MPI
+
+**Note**: The following examples are applicable for Gaudi based and Host NIC scale-out.
+
 ### Running HCCL on 1 server (8 Gaudi devices)
 
 Configuration: One server with 8 ranks, 32 MB size, all_reduce collective, 1000 iterations
@@ -199,7 +210,7 @@ Different options for running one server with 8 ranks and size of 32 MB:
     HCCL_COMM_ID=127.0.0.1:5555 python3 run_hccl_demo.py --nranks 8 --node_id 0 --size 33554432B --test all_reduce
 ### Running HCCL demo on 2 servers (16 Gaudi devices)
 
-Configuration: Host NIC Scale out using OFI, 16 ranks, 32 MB size, all_reduce collective, 1000 iterations
+Configuration: 16 ranks, 32 MB size, all_reduce collective, 1000 iterations
 
 First server command:
 
@@ -236,6 +247,9 @@ Second server output:
     Allreduce hccl_rank=10 size=33554432 <float> Input Buffer [10 26 42 58 ...] reduced to Output Buffer [120 376 632 888 ...] which is fine.
 
 ## Examples - MPI mode
+
+**Note**: The following examples are applicable for Gaudi based and Host NIC scale-out.
+
 ### Running HCCL on 1 server (8 Gaudi devices)
 
 All available MPI options are supported.<br />
@@ -262,7 +276,7 @@ Output example:
 
 ### Running HCCL demo on 2 servers (16 Gaudi devices)
 
-Configuration: Host NIC Scale out using OFI, 16 ranks, 32 MB size, all_reduce collective, 1000 iterations
+Configuration: 16 ranks, 32 MB size, all_reduce collective, 1000 iterations
 
 First option using MPI hostfile:
 
