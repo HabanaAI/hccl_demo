@@ -406,14 +406,12 @@ int main()
 #endif
         // Create Streams
         CHECK_SYNAPSE_STATUS(
-            synStreamCreate(&demo_data.collective_stream, demo_data.device_handle, STREAM_TYPE_NETWORK_COLLECTIVE, 0));
-        CHECK_SYNAPSE_STATUS(synStreamCreate(&demo_data.device_to_host_stream,
+            synStreamCreateGeneric(&demo_data.collective_stream, demo_data.device_handle, 0));
+        CHECK_SYNAPSE_STATUS(synStreamCreateGeneric(&demo_data.device_to_host_stream,
                                              demo_data.device_handle,
-                                             STREAM_TYPE_COPY_DEVICE_TO_HOST,
                                              0));
-        CHECK_SYNAPSE_STATUS(synStreamCreate(&demo_data.host_to_device_stream,
+        CHECK_SYNAPSE_STATUS(synStreamCreateGeneric(&demo_data.host_to_device_stream,
                                              demo_data.device_handle,
-                                             STREAM_TYPE_COPY_HOST_TO_DEVICE,
                                              0));
 
         // Generate unique id
