@@ -17,7 +17,7 @@ The following lists the supported collective operations:
 5. Broadcast
 6. Reduce
 
-Send/Recv is the supported point to point communication. It illustrates exchanging data between pairs of Gaudis within the same box.
+Send/Recv is the supported point to point communication. It illustrates exchanging data between pairs of Gaudis in same box or an outer box, via Gaudi based scale-out or Host NIC scale-out
 
 
 ## Contents
@@ -149,6 +149,7 @@ This mode is supported with EFA provider if the following conditions are met:
     --test             - str, Which hccl test to run (for example: broadcast/all_reduce) (default: broadcast)
     --size             - str, Data size in units of G,M,K,B or no unit (default: 33554432 Bytes)
     --loop             - int, Number of iterations (default: 10)
+    --ranks_list       - str, Comma separated list of pairs of ranks for send_recv ranks test only, e.g. 0,8,1,8 (optional, default is to perform regular send_recv test with all ranks)
     --test_root        - int, Index of root rank for broadcast and reduce tests
     --csv_path         - str, Path to a file for results output
     -mpi               - Use MPI for managing execution
@@ -170,7 +171,7 @@ Set the below when using any operating system that has Linux kernel version betw
 
 Run the execution command
 
-    HCCL_COMM_ID=<IP:PORT> ./run_hcl_demo.py [options]
+    HCCL_COMM_ID=<IP:PORT> ./run_hccl_demo.py [options]
 
 ## Results
 Results are printed to the display<br />
