@@ -12,6 +12,7 @@ Args
     --test             - str, Which hccl test to run (for example: broadcast/all_reduce) (default: broadcast)
     --size             - str, Data size in units of G,M,K,B or no unit (default: 33554432)
     --loop             - int, Number of iterations (default: 10)
+    --ranks_list       - str, Comma separated list of pairs of ranks for send_recv ranks test only, e.g. 0,8,1,8 (optional, default is to perform regular send_recv test with all ranks)
     --test_root        - int, Index of root rank for broadcast and reduce tests
     --csv_path         - str, Path to a file for results output
     -mpi               - Use MPI for managing execution
@@ -45,6 +46,7 @@ import logging as Logger
 import datetime, glob
 import os, sys, subprocess, signal
 from multiprocessing import Pool
+import struct
 
 class DemoTest:
     def __init__(self):
@@ -54,6 +56,7 @@ class DemoTest:
         self.test                     = None
         self.size                     = None
         self.loop                     = None
+        self.ranks_list               = None
         self.test_root                = None
         self.mpi                      = None
         self.clean                    = None
@@ -116,6 +119,7 @@ class DemoTest:
                             help="Number of loop iterations", default=10)
         parser.add_argument("--test_root", type=int, default=0,
                             help="Index of root rank for broadcast and reduce tests (optional)")
+        parser.add_argument("--ranks_list", type=str, help="list of pairs of ranks for send_recv ranks scaleout, e.g. 0,8,1,8 (optional)")
         parser.add_argument("--csv_path", type=str,
                             help="Path to a file for results output (optional)")
         parser.add_argument("-mpi", action="store_true",
@@ -131,7 +135,7 @@ class DemoTest:
         parser.add_argument("-no_color", action="store_true",
                             help="Disable colored output in terminal.")
 
-        self.crete_logger()
+        self.create_logger()
 
         args, self.mpi_args = parser.parse_known_args()
 
@@ -193,6 +197,7 @@ class DemoTest:
             self.validate_arguments()
             self.get_env()
             self.parse_size()
+            self.validate_size()
             self.prepare_command()
             if self.clean:
                 self.clean_artifacts()
@@ -242,11 +247,14 @@ class DemoTest:
             cmd_args.append("HCCL_DEMO_TEST="          + str(self.test))
             cmd_args.append("HCCL_DEMO_TEST_SIZE="     + str(self.size))
             cmd_args.append("HCCL_DEMO_TEST_LOOP="     + str(self.loop))
+            if self.ranks_list:
+                cmd_args.append("HCCL_RANKS_LIST="        + str(self.ranks_list))
             cmd_args.append("HCCL_DEMO_TEST_ROOT="     + str(self.test_root))
             cmd_args.append("HCCL_DEMO_CSV_PATH="      + str(self.csv_path))
             cmd_args.append("HCCL_DEMO_MPI_REQUESTED=" + str(int(self.mpi)))
             cmd_args.append("MPI_ENABLED="             + str(int(self.mpi)))
             cmd_args.append("NUMA_MAPPING_DIR="        + str(numa_output_path))
+
             cmd_args.extend(self.set_optional_env())
             if not self.mpi:
                 rank = id + self.node_id * self.number_of_processes
@@ -486,6 +494,27 @@ class DemoTest:
             self.log_error(f'[parse_size] {e}' ,exception=True)
             raise Exception(e)
 
+    def validate_size(self):
+        '''The following method is used to validate the size requested by the user.
+           broadcast | reduce | all_reduce | all_gather | send_recv - require at least a single element.
+           all2all | reduce_scatter - require at least a single element for each rank (i.e element * number of ranks)
+           since HCCL demo supports float data type only, the minimum size would be:
+           calculated number of elements * size of float'''
+        try:
+            float_size = struct.calcsize('f')
+            if self.test == 'reduce_scatter' or self.test == 'all2all':
+                min_supported_size = self.nranks * float_size
+                if (min_supported_size > int(self.size)):
+                    self.exit_demo(f'[validate_size] Requested size: {self.size}B was less than supported minimun size: {min_supported_size}B')
+            else:
+                min_supported_size = float_size
+                if (min_supported_size > int(self.size)):
+                    self.exit_demo(f'[validate_size] Requested size: {self.size}B was less than supported minimun size: {min_supported_size}B')
+
+        except Exception as e:
+            self.log_error(f'[validate_size] {e}' ,exception=True)
+            raise Exception(e)
+
     def display_test_list(self):
         '''The following method is used to display list of tests
            for the user upon request or error in chosen test name.'''
@@ -503,8 +532,11 @@ class DemoTest:
            --ranks_per_node was not set by the user.'''
         try:
             ranks_per_node = self.run_command("lspci | grep -c -E '(Habana|1da3)'")
-            self.ranks_per_node = int(ranks_per_node[0])
-            self.log_debug(f'The user did not set --ranks_per_node. lscpi command found {self.ranks_per_node} ranks per node.')
+            if (ranks_per_node[0] != '0'):
+                self.ranks_per_node = int(ranks_per_node[0])
+                self.log_debug(f'The user did not set --ranks_per_node. lscpi command found {self.ranks_per_node} ranks per node.')
+            else:
+                self.exit_demo(f'[get_ranks_per_node] The user did not set --ranks_per_node. lscpi command did not found number of ranks. Please provide --ranks_per_node.')
         except Exception as e:
             self.log_error(f'[get_ranks_per_node] {e}' ,exception=True)
             raise Exception(e)
@@ -587,7 +619,7 @@ class DemoTest:
     def clear_logs(self):
         '''The following method is used in order to clean old HCCL demo log files'''
         try:
-            rm_cmd = 'rm -rf ~/.habana_logs*'
+            rm_cmd = 'rm -rf ~/.habana_logs*'   # This will not work when running demo w/o MPI, as it will run from each server ad collides with logs there created by another server
             self.run_process(rm_cmd)
         except Exception as e:
             self.log_error(f'[clear_logs] {e}' ,exception=True)
@@ -607,7 +639,7 @@ class DemoTest:
         except Exception as e:
             self.log_error(f'[remove_old_logs] {e}' ,exception=True)
 
-    def crete_logger(self):
+    def create_logger(self):
         '''The following method is used in order to start logger.
            Log files will be saved locally with the following prefix: HCCL_demo_log_*'''
         try:
@@ -615,7 +647,7 @@ class DemoTest:
             self.log_debug("HCCL Demo - Start Logger")
             self.remove_old_logs()
         except Exception as e:
-            self.log_error(f'[crete_logger] {e}' ,exception=True)
+            self.log_error(f'[create_logger] {e}' ,exception=True)
 
     def clean_artifacts(self):
         '''The following method is used in order to clean artifacts such as:
