@@ -199,7 +199,8 @@ Output example:
     Allreduce hccl_rank=6 size=33554432 <float> Input Buffer [6 14 22 30 ...] reduced to Output Buffer [28 92 156 220 ...] which is fine.
     ###############################################################################
     [BENCHMARK] hcclAllReduce(src!=dst, count=8388608, dtype=fp32, iterations=1000)
-    [BENCHMARK]     Bandwidth     : <Test results> MB/s
+    [BENCHMARK]     NW Bandwidth   : <Test results> MB/s
+    [BENCHMARK]     Algo Bandwidth : <Test results> MB/s
     ###############################################################################
 
 Different options for running one server with 8 ranks and size of 32 MB:
@@ -233,7 +234,8 @@ First server output:
     Allreduce hccl_rank=5 size=33554432 <float> Input Buffer [5 21 37 53 ...] reduced to Output Buffer [120 376 632 888 ...] which is fine.
     ###############################################################################
     [BENCHMARK] hcclAllReduce(src!=dst, count=8388608, dtype=fp32, iterations=1000)
-    [BENCHMARK]     Bandwidth     : <Test results> MB/s
+    [BENCHMARK]     NW Bandwidth     : <Test results> MB/s
+    [BENCHMARK]     Algo Bandwidth   : <Test results> MB/s
     ###############################################################################
 
 Second server output:
@@ -272,7 +274,8 @@ Output example:
     Allreduce hccl_rank=6 size=33554432 <float> Input Buffer [6 14 22 30 ...] reduced to Output Buffer [28 92 156 220 ...] which is fine.
     ###############################################################################
     [BENCHMARK] hcclAllReduce(src!=dst, count=8388608, dtype=fp32, iterations=1000)
-    [BENCHMARK]     Bandwidth     : <Test results> MB/s
+    [BENCHMARK]     NW Bandwidth     : <Test results> MB/s
+    [BENCHMARK]     Algo Bandwidth   : <Test results> MB/s
     ###############################################################################
 
 ### Running HCCL demo on 2 servers (16 Gaudi devices)
@@ -303,7 +306,8 @@ First server output:
     Allreduce hccl_rank=5 size=33554432 <float> Input Buffer [5 21 37 53 ...] reduced to Output Buffer [120 376 632 888 ...] which is fine.
     ###############################################################################
     [BENCHMARK] hcclAllReduce(src!=dst, count=8388608, dtype=fp32, iterations=1000)
-    [BENCHMARK]     Bandwidth     : <Test results> MB/s
+    [BENCHMARK]     NW Bandwidth     : <Test results> MB/s
+    [BENCHMARK]     Algo Bandwidth   : <Test results> MB/s
     ###############################################################################
 
 Second server output:

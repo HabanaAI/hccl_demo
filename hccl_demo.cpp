@@ -347,7 +347,7 @@ void describe_stat(const string&          stat_name,
         size_t delimiter_size = stat_name.length() + string {"[BENCHMARK]"}.length() + 1;
         ss << get_print_delimiter(delimiter_size, '#') << '\n';
         ss << "[BENCHMARK] " << stat_name << '\n';
-        ss << "[BENCHMARK]     NW Bandwidth   : " << format_bw(avg_bandwidth);
+        ss << "[BENCHMARK]     NW Bandwidth   : " << format_bw(avg_bandwidth) << '\n';
         ss << "[BENCHMARK]     Algo Bandwidth : " << format_bw(algo_bandwidth);
         ss << '\n' << get_print_delimiter(delimiter_size, '#') << '\n';
         log() << ss.str();
