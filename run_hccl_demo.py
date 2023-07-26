@@ -11,7 +11,7 @@ Args
     --node_id          - int, ID of the running host. Each host should have unique id between 0-num_nodes
     --test             - str, Which hccl test to run (for example: broadcast/all_reduce) (default: broadcast)
     --size             - str, Data size in units of G,M,K,B or no unit (default: 33554432)
-    --loop             - int, Number of iterations (default: 10)
+    --loop             - int, Number of iterations (must be positive, default: 10)
     --ranks_list       - str, Comma separated list of pairs of ranks for send_recv ranks test only, e.g. 0,8,1,8 (optional, default is to perform regular send_recv test with all ranks)
     --test_root        - int, Index of root rank for broadcast and reduce tests
     --csv_path         - str, Path to a file for results output
@@ -32,13 +32,13 @@ Env variables - Host scaleout
     HCCL_OVER_OFI         - 1 to use OFI between boxes, 0 to use scaleout nics
 
 Env variables - Host affinity settings
-    NUM_SOCKETS           - Number of sockets for proccess affinity (default 0)
-    NUM_HT                - Number of hyper threads for proccess affinity (default 0)
-    NUM_CORES_PER_SOCKET  - Number of cores per socket for proccess affinity (default 0)
-    ENFORCE_PROC_AFFINITY - Enfornce using proccess affinity (default 0)
-    DISABLE_PROC_AFFINITY - Disable using proccess affinity (default 0)
-    BEST_EFFORT_AFFINITY  - Use best effort proccess affinity (default 0)
-    NUMA_MAPPING_DIR      - Location of numa mapping file used for proccess affinity'''
+    NUM_SOCKETS           - Number of sockets for process affinity (default 0)
+    NUM_HT                - Number of hyper threads for process affinity (default 0)
+    NUM_CORES_PER_SOCKET  - Number of cores per socket for process affinity (default 0)
+    ENFORCE_PROC_AFFINITY - Enforce using process affinity (default 0)
+    DISABLE_PROC_AFFINITY - Disable using process affinity (default 0)
+    BEST_EFFORT_AFFINITY  - Use best effort process affinity (default 0)
+    NUMA_MAPPING_DIR      - Location of numa mapping file used for process affinity'''
 """
 
 import argparse
@@ -98,7 +98,8 @@ class DemoTest:
         self.default_mpi_env_list_dev = ['HCL_ROOT',
                                          'SYNAPSE_ROOT',
                                          'BUILD_ROOT_LATEST',
-                                         'GC_KERNEL_PATH']
+                                         'GC_KERNEL_PATH',
+                                         'ENGINES_FW_RELEASE_BUILD']
         self.default_mpi_arg_list     = ['--allow-run-as-root',
                                          '--mca btl_tcp_if_include']
         self.ignore_mpi_errors_list   = ['--mca btl_openib_warn_no_device_params_found 0']
@@ -180,6 +181,8 @@ class DemoTest:
             if not self.test in self.test_list:
                 self.display_test_list()
                 self.exit_demo(f'[validate_arguments] Chosen test: {self.test} is not part of the tests list')
+            if self.loop < 1:
+                self.exit_demo(f'[validate_arguments] Argument loop was set to: {self.loop}, it must be positive')
         except Exception as e:
             self.log_error(f'[validate_arguments] {e}' ,exception=True)
             raise Exception(e)
@@ -404,13 +407,13 @@ class DemoTest:
     def handle_affinity(self):
         '''The following method is used in order to set affinity for the processes.
             Affinity settings could be managed using the following environment variables:
-            NUM_SOCKETS           - Number of sockets for proccess affinity (default 0)
-            NUM_HT                - Number of hyper threads for proccess affinity (default 0)
-            NUM_CORES_PER_SOCKET  - Number of cores per socket for proccess affinity (default 0)
-            ENFORCE_PROC_AFFINITY - Enfornce using proccess affinity (default 0)
-            DISABLE_PROC_AFFINITY - Disable using proccess affinity (default 0)
-            BEST_EFFORT_AFFINITY  - Use best effort proccess affinity (default 0)
-            NUMA_MAPPING_DIR      - Location of numa mapping file used for proccess affinity'''
+            NUM_SOCKETS           - Number of sockets for process affinity (default 0)
+            NUM_HT                - Number of hyper threads for process affinity (default 0)
+            NUM_CORES_PER_SOCKET  - Number of cores per socket for process affinity (default 0)
+            ENFORCE_PROC_AFFINITY - Enforce using process affinity (default 0)
+            DISABLE_PROC_AFFINITY - Disable using process affinity (default 0)
+            BEST_EFFORT_AFFINITY  - Use best effort process affinity (default 0)
+            NUMA_MAPPING_DIR      - Location of numa mapping file used for process affinity'''
         try:
             from affinity import Affinity
             self.log_debug('Setting affinity')

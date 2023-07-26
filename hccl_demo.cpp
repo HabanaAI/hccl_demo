@@ -31,6 +31,8 @@
 #define DEFAULT_TEST_SIZE 33554432
 #define DEFAULT_TEST_LOOP 10
 #define DEFAULT_BOX_SIZE  8
+#define ALLOCATE_HBM_SIZE    (1024*1024*1024)  // 1G
+#define AMOUNT_JUMBO_BUFFERS (2)
 
 constexpr int INVALID_RANK = -1;
 
@@ -135,7 +137,7 @@ hcclResult_t get_avg_duration(hccl_demo_data& demo_data, hccl_demo_stats& stat)
     return hcclSuccess;
 }
 
-hccl_demo_stats benchmark(hccl_demo_data& demo_data, const function<void()>& fn)
+hccl_demo_stats benchmark(hccl_demo_data& demo_data, const function<void(uint64_t)>& fn)
 {
     hccl_demo_stats stat;
 
@@ -147,7 +149,7 @@ hccl_demo_stats benchmark(hccl_demo_data& demo_data, const function<void()>& fn)
 
     for (size_t iter = 0; iter < demo_data.num_iters; ++iter)
     {
-        fn();
+        fn(iter);
     }
 
     CHECK_SYNAPSE_STATUS(synStreamSynchronize(demo_data.collective_stream));
@@ -385,13 +387,14 @@ hcclResult_t send_recv_test(void*                 out_dev_ptr,
 
 using RanksVector = std::vector<int>;
 
-static hcclResult_t send_recv_ranks_test(std::vector<void*>&   output_dev_ptrs,
-                                         const void*           input_dev_ptr,
-                                         const size_t          count,
-                                         hcclComm_t            comm,
-                                         const synStreamHandle stream,
-                                         const RanksVector&    recvRanks,
-                                         const RanksVector&    sendRanks)
+static hcclResult_t send_recv_ranks_test(uint64_t                     iter,
+                                         const std::vector<uint64_t>& output_dev_ptrs,
+                                         const void*                  input_dev_ptr,
+                                         const size_t                 count,
+                                         hcclComm_t                   comm,
+                                         const synStreamHandle        stream,
+                                         const RanksVector&           recvRanks,
+                                         const RanksVector&           sendRanks)
 {
     hcclGroupStart();
 
@@ -400,11 +403,12 @@ static hcclResult_t send_recv_ranks_test(std::vector<void*>&   output_dev_ptrs,
         CHECK_HCCL_STATUS(hcclSend((const void*) input_dev_ptr, count, hcclFloat32, sendRank, comm, stream));
     }
 
-    size_t rankCount = 0;
+    uint64_t outputBufferIndex = (recvRanks.size() * iter) % output_dev_ptrs.size();
     for (const int recvRank : recvRanks)
     {
-        CHECK_HCCL_STATUS(hcclRecv((void*) output_dev_ptrs[rankCount], count, hcclFloat32, recvRank, comm, stream));
-        rankCount++;
+        CHECK_HCCL_STATUS(
+            hcclRecv((void*) output_dev_ptrs[outputBufferIndex], count, hcclFloat32, recvRank, comm, stream));
+        outputBufferIndex = (outputBufferIndex + 1 == output_dev_ptrs.size()) ? 0 : outputBufferIndex + 1;
     }
 
     hcclGroupEnd();
@@ -412,27 +416,18 @@ static hcclResult_t send_recv_ranks_test(std::vector<void*>&   output_dev_ptrs,
     return hcclSuccess;
 }
 
-static bool send_recv_test_driver(hccl_demo_data&           demo_data,
-                                  const std::string&        test_type,
-                                  const int                 hccl_rank,
-                                  const uint64_t            data_size,
-                                  const uint64_t            count,
-                                  const std::vector<float>& input_host_data,
-                                  const uint64_t            input_dev_ptr,
-                                  const uint64_t            output_dev_ptr)
+static void send_recv_test_driver(hccl_demo_data&             demo_data,
+                                  const std::string&          test_type,
+                                  const int                   hccl_rank,
+                                  const uint64_t              data_size,
+                                  const uint64_t              count,
+                                  const std::vector<uint64_t> input_dev_ptrs,
+                                  const std::vector<uint64_t> output_dev_ptrs)
 {
     //
-    // This test does the following whether it's a single box or scaleout.
+    // This test does the following whether it's a single box or scale-out.
     // For single box, exchange buffer with adjacent rank. If odd number of ranks then last rank does self send/recv.
-    // Fill input data with rank number, example:
-    // Input        |   Output
-    // G0 G1 G2 G3      G0 G1 G2 G3
-    // 1  2  3  4   =>  2  1  4  3
-    // 1  2  3  4       2  1  4  3
-    // 1  2  3  4       2  1  4  3
-    // 1  2  3  4       2  1  4  3
-
-    // For scaleout test, exchange buffer with next peer rank in ring manner.
+    // For scale-out test, exchange buffer with next peer rank in ring manner.
     //
     // Example:
     // 4 boxes: R0 -> R8 & R0 <- R24, R8 <- R0 & R8 -> R16, R16 <- R8 & R16 -> R24, R24 <- R16 & R24 ->R0 etc.
@@ -440,7 +435,6 @@ static bool send_recv_test_driver(hccl_demo_data&           demo_data,
     //
     // In both cases, each rank does 1 send and 1 recv from another (same) rank.
 
-    bool         is_ok            = true;
     const double send_recv_factor = 1;
 
     const unsigned int boxSize    = static_cast<unsigned>(get_demo_box_size());
@@ -475,52 +469,20 @@ static bool send_recv_test_driver(hccl_demo_data&           demo_data,
         recvFromRank = sendToRank;
     }
 
-    const void* input_host_data_ptr = reinterpret_cast<const void*>(input_host_data.data());
+    auto stat = benchmark(
+        demo_data,
+        [&](uint64_t iter) {
+            uint64_t index = iter % input_dev_ptrs.size();
+            CHECK_HCCL_STATUS(send_recv_test((void*) output_dev_ptrs[index],
+                                             (const void*) input_dev_ptrs[index],
+                                             count,
+                                             demo_data.hccl_comm,
+                                             demo_data.collective_stream,
+                                             recvFromRank,
+                                             sendToRank));
+        });
 
-    auto stat = benchmark(demo_data, [&]() {
-        CHECK_HCCL_STATUS(send_recv_test((void*) output_dev_ptr,
-                                         (const void*) input_dev_ptr,
-                                         (uint64_t) input_host_data.size(),
-                                         demo_data.hccl_comm,
-                                         demo_data.collective_stream,
-                                         recvFromRank,
-                                         sendToRank));
-    });
-
-    // Correctness check
-
-    auto        output_host_data     = vector<float>(input_host_data.size());
-    const void* output_host_data_ptr = reinterpret_cast<void*>(output_host_data.data());
-
-    CHECK_SYNAPSE_STATUS(synHostMap(demo_data.device_handle, data_size, output_host_data_ptr));
-
-    CHECK_SYNAPSE_STATUS(synMemCopyAsync(demo_data.device_to_host_stream,
-                                         output_dev_ptr,
-                                         data_size,
-                                         (uint64_t) output_host_data_ptr,
-                                         DRAM_TO_HOST));
-    CHECK_SYNAPSE_STATUS(synStreamSynchronize(demo_data.device_to_host_stream));
-
-    for (size_t i = 0; i < output_host_data.size(); ++i)
-    {
-        if (abs(output_host_data[i] - (float) (recvFromRank + 1)) != 0)
-        {
-            is_ok = false;
-        }
-    }
-
-    log() << "SendRecv hccl_rank=" << hccl_rank << " recvRank=" << recvFromRank << " size=" << data_size << " <float>"
-          << " Input Buffer [" << input_host_data[0] << " " << input_host_data[1] << " " << input_host_data[2] << " "
-          << input_host_data[3] << " ...]"
-          << " Output Buffer [" << output_host_data[0] << " " << output_host_data[1] << " " << output_host_data[2]
-          << " " << output_host_data[3] << " ...]"
-          << " which is " << (is_ok ? "fine." : "bad.") << endl;
-
-    CHECK_SYNAPSE_STATUS(synHostUnmap(demo_data.device_handle, input_host_data_ptr));
-    CHECK_SYNAPSE_STATUS(synHostUnmap(demo_data.device_handle, output_host_data_ptr));
-
-    // End of correctness check
-    describe_stat("hcclSendRecv(src!=dst, count=" + to_string(input_host_data.size()) +
+    describe_stat("hcclSendRecv(src!=dst, count=" + to_string(count) +
                       ", dtype=fp32, iterations=" + to_string(demo_data.num_iters) + ")",
                   stat,
                   data_size,
@@ -530,7 +492,6 @@ static bool send_recv_test_driver(hccl_demo_data&           demo_data,
                   test_type,
                   "float",
                   should_report_stat(hccl_rank));
-    return is_ok;
 }
 
 struct RanksPairSendRecv
@@ -580,22 +541,20 @@ static std::vector<RanksPairSendRecv> parseRanksList(const std::string& ranksLis
     return ranksList;
 }
 
-static bool send_recv_ranks_test_driver(hccl_demo_data&           demo_data,
-                                        const std::string&        test_type,
-                                        const int                 hccl_rank,
-                                        const uint64_t            data_size,
-                                        const uint64_t            count,
-                                        const std::vector<float>& input_host_data,
-                                        const uint64_t            input_dev_ptr,
-                                        const uint64_t            output_dev_ptr)
+static void send_recv_ranks_test_driver(hccl_demo_data&             demo_data,
+                                        const std::string&          test_type,
+                                        const int                   hccl_rank,
+                                        const uint64_t              data_size,
+                                        const uint64_t              count,
+                                        const std::vector<uint64_t> input_dev_ptrs,
+                                        const std::vector<uint64_t> output_dev_ptrs)
 {
     //
     // This test performs send_recv from/to specific ranks given as a list
     // A single rank can send to one or many ranks and can also recv from one or many ranks.
-    // It supports both scaleup and scaleout send/recv.
-    // It reports adjusted B/W according to number of recvs.
+    // It supports both scale-up and scale-out send/recv.
+    // It reports adjusted B/W according to number of receives.
 
-    bool   is_ok                  = true;
     double send_recv_ranks_factor = 1;
 
     const unsigned int numOfRanks = demo_data.nranks;
@@ -644,70 +603,23 @@ static bool send_recv_ranks_test_driver(hccl_demo_data&           demo_data,
               << std::endl;
     }
 
-    // allocate output buffer per recv rank - could be 0 if not receiving
-    std::vector<void*>    output_dev_ptrs(recvFromRanks.size(), 0);
-    std::vector<uint64_t> output_dev_ptrs_uint(recvFromRanks.size(), 0);
-    for (size_t rankCount = 0; rankCount < output_dev_ptrs.size(); rankCount++)
+    if (output_dev_ptrs.size() < recvFromRanks.size())
     {
-        CHECK_SYNAPSE_STATUS(
-            synDeviceMalloc(demo_data.device_handle, data_size, 0, 0, &(output_dev_ptrs_uint[rankCount])));
-        output_dev_ptrs[rankCount] = (void*) (output_dev_ptrs_uint[rankCount]);
+        throw runtime_error {"Number of allocated receive buffers isn't sufficient to fulfill number of receives"};
     }
 
-    const void* input_host_data_ptr = reinterpret_cast<const void*>(input_host_data.data());
-
-    auto stat = benchmark(demo_data, [&]() {
-        CHECK_HCCL_STATUS(send_recv_ranks_test(output_dev_ptrs,
-                                               (const void*) input_dev_ptr,
-                                               (uint64_t) input_host_data.size(),
+    auto stat = benchmark(demo_data, [&](uint64_t iter) {
+        CHECK_HCCL_STATUS(send_recv_ranks_test(iter,
+                                               output_dev_ptrs,
+                                               (const void*) input_dev_ptrs[iter],
+                                               count,
                                                demo_data.hccl_comm,
                                                demo_data.collective_stream,
                                                recvFromRanks,
                                                sendToRanks));
     });
 
-    // Correctness check
-
-    auto        output_host_data     = vector<float>(input_host_data.size());
-    const void* output_host_data_ptr = reinterpret_cast<void*>(output_host_data.data());
-    CHECK_SYNAPSE_STATUS(synHostMap(demo_data.device_handle, data_size, output_host_data_ptr));
-
-    for (size_t rankIndex = 0; rankIndex < recvFromRanks.size(); rankIndex++)
-    {
-        output_host_data.assign(input_host_data.size(), 0);  // clear host test buffer
-        const int recvFromRank = recvFromRanks[rankIndex];
-
-        CHECK_SYNAPSE_STATUS(synMemCopyAsync(demo_data.device_to_host_stream,
-                                             (output_dev_ptrs_uint[rankIndex]),
-                                             data_size,
-                                             (uint64_t) output_host_data_ptr,
-                                             DRAM_TO_HOST));
-        CHECK_SYNAPSE_STATUS(synStreamSynchronize(demo_data.device_to_host_stream));
-
-        for (size_t i = 0; i < output_host_data.size(); ++i)
-        {
-            if (abs(output_host_data[i] - (float) (recvFromRank + 1)) != 0)
-            {
-                is_ok = false;
-            }
-        }
-
-        log() << "SendRecv hccl_rank=" << hccl_rank << " recvRank=" << recvFromRank << " size=" << data_size
-              << " <float>"
-              << " Input Buffer [" << input_host_data[0] << " " << input_host_data[1] << " " << input_host_data[2]
-              << " " << input_host_data[3] << " ...]"
-              << " Output Buffer [" << output_host_data[0] << " " << output_host_data[1] << " " << output_host_data[2]
-              << " " << output_host_data[3] << " ...]"
-              << " which is " << (is_ok ? "fine." : "bad.") << endl;
-
-        CHECK_SYNAPSE_STATUS(synDeviceFree(demo_data.device_handle, output_dev_ptrs_uint[rankIndex], 0));
-    }
-
-    CHECK_SYNAPSE_STATUS(synHostUnmap(demo_data.device_handle, input_host_data_ptr));
-    CHECK_SYNAPSE_STATUS(synHostUnmap(demo_data.device_handle, output_host_data_ptr));
-
-    // End of correctness check
-    describe_stat("hcclSendRecv(src!=dst, count=" + to_string(input_host_data.size()) +
+    describe_stat("hcclSendRecv(src!=dst, count=" + to_string(count) +
                       ", dtype=fp32, iterations=" + to_string(demo_data.num_iters) + ")",
                   stat,
                   data_size,
@@ -717,12 +629,10 @@ static bool send_recv_ranks_test_driver(hccl_demo_data&           demo_data,
                   test_type,
                   "float",
                   ((hccl_rank == reportingReceiverRank) || (hccl_rank == reportingSenderRank)));
-    return is_ok;
 }
 
 int main()
 {
-    bool is_ok = true;
     try
     {
         log() << "Running HCCL Demo :: A simple program demonstrating HCCL usage from C++" << endl;
@@ -788,89 +698,62 @@ int main()
 
         uint64_t input_dev_ptr {};
         uint64_t output_dev_ptr {};
+        std::vector<uint64_t> input_dev_ptrs;
+        std::vector<uint64_t> output_dev_ptrs;
 
         // Allocate buffers on the HPU device
-        uint64_t    data_size           = get_demo_test_size();  // bytes
+        const uint64_t data_size           = get_demo_test_size();  // bytes
+        string         test_type           = get_demo_test_type();
         uint64_t    count               = data_size / sizeof(float);
-        auto        input_host_data     = vector<float>(count, hccl_rank + 1);
-        const void* input_host_data_ptr = reinterpret_cast<void*>(input_host_data.data());
 
-        CHECK_SYNAPSE_STATUS(synDeviceMalloc(demo_data.device_handle, data_size, 0, 0, &input_dev_ptr));
-        CHECK_SYNAPSE_STATUS(synDeviceMalloc(demo_data.device_handle, data_size, 0, 0, &output_dev_ptr));
-        CHECK_SYNAPSE_STATUS(synHostMap(demo_data.device_handle, data_size, input_host_data_ptr));
-        CHECK_SYNAPSE_STATUS(synMemCopyAsync(demo_data.host_to_device_stream,
-                                             (uint64_t) input_host_data_ptr,
-                                             data_size,
-                                             input_dev_ptr,
-                                             HOST_TO_DRAM));
-        CHECK_SYNAPSE_STATUS(synStreamSynchronize(demo_data.host_to_device_stream));
+        const uint64_t output_size     = (test_type == "all_gather") ? data_size * demo_data.nranks : data_size;
+        uint64_t       max_buffer_size = std::max(data_size, output_size);
 
-        string test_type = get_demo_test_type();
+        uint64_t number_of_buffers = 1;
+        if (max_buffer_size < ALLOCATE_HBM_SIZE)
+        {
+            if ((ALLOCATE_HBM_SIZE / max_buffer_size) <= 2)
+            {
+                number_of_buffers = AMOUNT_JUMBO_BUFFERS;
+            }
+            else
+            {
+                number_of_buffers = ALLOCATE_HBM_SIZE / max_buffer_size;
+            }
+        }
+
+        CHECK_SYNAPSE_STATUS(
+            synDeviceMalloc(demo_data.device_handle, data_size * number_of_buffers, 0, 0, &input_dev_ptr));
+        CHECK_SYNAPSE_STATUS(
+            synDeviceMalloc(demo_data.device_handle, output_size * number_of_buffers, 0, 0, &output_dev_ptr));
+
+        for (uint64_t index = 0; index < number_of_buffers; index++)
+        {
+            input_dev_ptrs.push_back(input_dev_ptr + (index * data_size));
+            output_dev_ptrs.push_back(output_dev_ptr + (index * output_size));
+        }
+
         const bool is_root_rank = should_report_stat(hccl_rank);
         if (test_type == "broadcast")
         {
             double broadcast_factor = 1;
             int    root             = get_demo_test_root();
 
-            for (uint64_t i = 0; i < count; ++i)
-            {
-                input_host_data[i] = i + hccl_rank;
-            }
-
-            // Copy from input_host_data_ptr to input_dev_ptr (to be used in benchmark)
-            CHECK_SYNAPSE_STATUS(synMemCopyAsync(demo_data.host_to_device_stream,
-                                                 (uint64_t) input_host_data_ptr,
-                                                 data_size,
-                                                 input_dev_ptr,
-                                                 HOST_TO_DRAM));
-
-            CHECK_SYNAPSE_STATUS(synStreamSynchronize(demo_data.host_to_device_stream));
-
             // Run HCCL Broadcast collective
-            auto stat = benchmark(demo_data, [&]() {
-                CHECK_HCCL_STATUS(hcclBroadcast((const void*) input_dev_ptr,
-                                                (void*) output_dev_ptr,
-                                                input_host_data.size(),
-                                                hcclFloat32,
-                                                root,
-                                                demo_data.hccl_comm,
-                                                demo_data.collective_stream));
-            });
+            auto stat = benchmark(
+                demo_data,
+                [&](uint64_t iter) {
+                    uint64_t index = iter % number_of_buffers;
+                    CHECK_HCCL_STATUS(hcclBroadcast((const void*) input_dev_ptrs[index],
+                                                    (void*) output_dev_ptrs[index],
+                                                    count,
+                                                    hcclFloat32,
+                                                    root,
+                                                    demo_data.hccl_comm,
+                                                    demo_data.collective_stream));
+                });
 
-            // Correctness check
-
-            auto        output_host_data     = vector<float>(input_host_data.size());
-            const void* output_host_data_ptr = reinterpret_cast<void*>(output_host_data.data());
-
-            CHECK_SYNAPSE_STATUS(synHostMap(demo_data.device_handle, data_size, output_host_data_ptr));
-            CHECK_SYNAPSE_STATUS(synMemCopyAsync(demo_data.device_to_host_stream,
-                                                 output_dev_ptr,
-                                                 data_size,
-                                                 (uint64_t) output_host_data_ptr,
-                                                 DRAM_TO_HOST));
-            CHECK_SYNAPSE_STATUS(synStreamSynchronize(demo_data.device_to_host_stream));
-
-            for (size_t i = 0; i < input_host_data.size(); ++i)
-            {
-                if (abs(output_host_data[i] - (float) (i + root)) != 0)
-                {
-                    is_ok = false;
-                }
-            }
-
-            log() << "Broadcast hccl_rank=" << hccl_rank << " root=" << root << " size=" << data_size << " <float>"
-                  << " Input Buffer [" << input_host_data[0] << " " << input_host_data[1] << " " << input_host_data[2]
-                  << " " << input_host_data[3] << " ...]"
-                  << " Output Buffer [" << output_host_data[0] << " " << output_host_data[1] << " "
-                  << output_host_data[2] << " " << output_host_data[3] << " ...]"
-                  << " which is " << (is_ok ? "fine." : "bad.") << endl;
-
-            CHECK_SYNAPSE_STATUS(synHostUnmap(demo_data.device_handle, input_host_data_ptr));
-            CHECK_SYNAPSE_STATUS(synHostUnmap(demo_data.device_handle, output_host_data_ptr));
-
-            // End of correctness check
-
-            describe_stat("Broadcast(count=" + to_string(input_host_data.size()) +
+            describe_stat("Broadcast(count=" + to_string(count) +
                               ", dtype=fp32, iterations=" + to_string(demo_data.num_iters) + ")",
                           stat,
                           data_size,
@@ -885,82 +768,21 @@ int main()
         {
             double allreduce_factor = ((double) (2 * (demo_data.nranks - 1))) / ((double) demo_data.nranks);
 
-            // Fill input data, example:
-            // Input        |   Output
-            // G0 G1 G2 G3      G0 G1 G2 G3
-            // 0  1  2  3   =>  6  6  6  6
-            // 4  5  6  7       22 22 22 22
-            // 8  9  10 11      38 38 38 38
-            // 12 13 14 15      54 54 54 54
-
-            for (uint64_t i = 0; i < count; ++i)
-            {
-                // We want to make sure we use different values on each cell and between ranks,
-                // but we don't want the summation to get too big, that is why we modulo by DATA_ELEMENTS_MAX.
-                input_host_data[i] = hccl_rank + (demo_data.nranks * (i % DATA_ELEMENTS_MAX));
-            }
-
-            //Copy from input_host_data_ptr to input_dev_ptr (to be used in benchmark)
-            CHECK_SYNAPSE_STATUS(synMemCopyAsync(demo_data.host_to_device_stream,
-                                                 (uint64_t) input_host_data_ptr,
-                                                 data_size,
-                                                 input_dev_ptr,
-                                                 HOST_TO_DRAM));
-            CHECK_SYNAPSE_STATUS(synStreamSynchronize(demo_data.host_to_device_stream));
-
             // Run HCCL AllReduce collective
-            auto stat = benchmark(demo_data, [&]() {
-                CHECK_HCCL_STATUS(hcclAllReduce((const void*) input_dev_ptr,
-                                                (void*) output_dev_ptr,
-                                                input_host_data.size(),
-                                                hcclFloat32,
-                                                hcclSum,
-                                                demo_data.hccl_comm,
-                                                demo_data.collective_stream));
-            });
+            auto stat = benchmark(
+                demo_data,
+                [&](uint64_t iter) {
+                    uint64_t index = iter % number_of_buffers;
+                    CHECK_HCCL_STATUS(hcclAllReduce((const void*) input_dev_ptrs[index],
+                                                    (void*) output_dev_ptrs[index],
+                                                    count,
+                                                    hcclFloat32,
+                                                    hcclSum,
+                                                    demo_data.hccl_comm,
+                                                    demo_data.collective_stream));
+                });
 
-            // Correctness check
-
-            auto        output_host_data     = vector<float>(input_host_data.size());
-            const void* output_host_data_ptr = reinterpret_cast<void*>(output_host_data.data());
-
-            CHECK_SYNAPSE_STATUS(synHostMap(demo_data.device_handle, data_size, output_host_data_ptr));
-            CHECK_SYNAPSE_STATUS(synMemCopyAsync(demo_data.device_to_host_stream,
-                                                 output_dev_ptr,
-                                                 data_size,
-                                                 (uint64_t) output_host_data_ptr,
-                                                 DRAM_TO_HOST));
-            CHECK_SYNAPSE_STATUS(synStreamSynchronize(demo_data.device_to_host_stream));
-
-            int start = 0;
-            int end   = demo_data.nranks - 1;
-            int expected;
-            int addCommSize;
-
-            for (size_t i = 0; i < input_host_data.size(); ++i)
-            {
-                addCommSize = demo_data.nranks * (i % DATA_ELEMENTS_MAX);
-
-                // Arithmetic progression
-                expected = ((start + addCommSize) + (end + addCommSize)) * demo_data.nranks / 2;
-                if (abs(output_host_data[i] - expected) != 0)
-                {
-                    is_ok = false;
-                }
-            }
-            log() << "Allreduce hccl_rank=" << hccl_rank << " size=" << data_size << " <float>"
-                  << " Input Buffer [" << input_host_data[0] << " " << input_host_data[1] << " " << input_host_data[2]
-                  << " " << input_host_data[3] << " ...]"
-                  << " reduced to Output Buffer [" << output_host_data[0] << " " << output_host_data[1] << " "
-                  << output_host_data[2] << " " << output_host_data[3] << " ...]"
-                  << " which is " << (is_ok ? "fine." : "bad.") << endl;
-
-            CHECK_SYNAPSE_STATUS(synHostUnmap(demo_data.device_handle, input_host_data_ptr));
-            CHECK_SYNAPSE_STATUS(synHostUnmap(demo_data.device_handle, output_host_data_ptr));
-
-            // End of correctness check
-
-            describe_stat("hcclAllReduce(src!=dst, count=" + to_string(input_host_data.size()) +
+            describe_stat("hcclAllReduce(src!=dst, count=" + to_string(count) +
                               ", dtype=fp32, iterations=" + to_string(demo_data.num_iters) + ")",
                           stat,
                           data_size,
@@ -975,84 +797,21 @@ int main()
         {
             double reduce_scatter_factor = ((double) (demo_data.nranks - 1)) / ((double) demo_data.nranks);
 
-            // Fill input data, example:
-            // Input        |   Output
-            // G0 G1 G2 G3      G0 G1 G2 G3
-            // 0  1  2  3   =>  6  22 38 54
-            // 4  5  6  7
-            // 8  9  10 11
-            // 12 13 14 15
-
-            for (uint64_t i = 0; i < count; ++i)
-            {
-                // We want to make sure we use different values on each cell and between ranks,
-                // but we don't want the summation to get too big, that is why we modulo by DATA_ELEMENTS_MAX.
-                input_host_data[i] = hccl_rank + (demo_data.nranks * (i % DATA_ELEMENTS_MAX));
-            }
-
-            //Copy from input_host_data_ptr to input_dev_ptr (to be used in benchmark)
-            CHECK_SYNAPSE_STATUS(synMemCopyAsync(demo_data.host_to_device_stream,
-                                                 (uint64_t) input_host_data_ptr,
-                                                 data_size,
-                                                 input_dev_ptr,
-                                                 HOST_TO_DRAM));
-            CHECK_SYNAPSE_STATUS(synStreamSynchronize(demo_data.host_to_device_stream));
-
             // Run HCCL ReduceScatter collective
-            auto stat = benchmark(demo_data, [&]() {
-                CHECK_HCCL_STATUS(hcclReduceScatter((const void*) input_dev_ptr,
-                                                    (void*) output_dev_ptr,
-                                                    input_host_data.size() / demo_data.nranks,
-                                                    hcclFloat32,
-                                                    hcclSum,
-                                                    demo_data.hccl_comm,
-                                                    demo_data.collective_stream));
-            });
+            auto stat = benchmark(
+                demo_data,
+                [&](uint64_t iter) {
+                    uint64_t index = iter % number_of_buffers;
+                    CHECK_HCCL_STATUS(hcclReduceScatter((const void*) input_dev_ptrs[index],
+                                                        (void*) output_dev_ptrs[index],
+                                                        count / demo_data.nranks,
+                                                        hcclFloat32,
+                                                        hcclSum,
+                                                        demo_data.hccl_comm,
+                                                        demo_data.collective_stream));
+                });
 
-            // Correctness check
-            auto        output_host_data     = vector<float>(input_host_data.size() / demo_data.nranks);
-            const void* output_host_data_ptr = reinterpret_cast<void*>(output_host_data.data());
-
-            CHECK_SYNAPSE_STATUS(
-                synHostMap(demo_data.device_handle, data_size / demo_data.nranks, output_host_data_ptr));
-            CHECK_SYNAPSE_STATUS(synMemCopyAsync(demo_data.device_to_host_stream,
-                                                 output_dev_ptr,
-                                                 data_size / demo_data.nranks,
-                                                 (uint64_t) output_host_data_ptr,
-                                                 DRAM_TO_HOST));
-            CHECK_SYNAPSE_STATUS(synStreamSynchronize(demo_data.device_to_host_stream));
-
-            int start;
-            int end;
-            int expected = 0;
-
-            for (size_t i = 0; i < output_host_data.size(); ++i)
-            {
-                start = (hccl_rank * output_host_data.size()) % DATA_ELEMENTS_MAX * demo_data.nranks;
-                end   = start + (demo_data.nranks - 1);
-                // Arithmetic progression
-                expected = (((start + demo_data.nranks * i) % (demo_data.nranks * DATA_ELEMENTS_MAX)) +
-                            ((end + demo_data.nranks * i) % (demo_data.nranks * DATA_ELEMENTS_MAX))) *
-                           demo_data.nranks / 2;
-                if (abs(output_host_data[i] - expected) != 0)
-                {
-                    is_ok = false;
-                }
-            }
-
-            log() << "ReduceScatter hccl_rank=" << hccl_rank << " size=" << data_size << " <float>"
-                  << " Input Buffer [" << input_host_data[0] << " " << input_host_data[1] << " " << input_host_data[2]
-                  << " " << input_host_data[3] << " ...]"
-                  << " reduced to Output Buffer [" << output_host_data[0] << " " << output_host_data[1] << " "
-                  << output_host_data[2] << " " << output_host_data[3] << " ...]"
-                  << " which is " << (is_ok ? "fine." : "bad.") << endl;
-
-            CHECK_SYNAPSE_STATUS(synHostUnmap(demo_data.device_handle, input_host_data_ptr));
-            CHECK_SYNAPSE_STATUS(synHostUnmap(demo_data.device_handle, output_host_data_ptr));
-
-            // End of correctness
-
-            describe_stat("hcclReduceScatter(src!=dst, count=" + to_string(input_host_data.size()) +
+            describe_stat("hcclReduceScatter(src!=dst, count=" + to_string(count) +
                               ", dtype=fp32, iterations=" + to_string(demo_data.num_iters) + ")",
                           stat,
                           data_size,
@@ -1066,80 +825,21 @@ int main()
         else if (test_type == "all_gather")
         {
             double all_gather_factor = ((double) (demo_data.nranks - 1));
-            CHECK_SYNAPSE_STATUS(
-                synDeviceMalloc(demo_data.device_handle, data_size * demo_data.nranks, 0, 0, &output_dev_ptr));
-
-            // Fill input data, example:
-            // Input        |   Output
-            // G0 G1 G2 G3      G0 G1 G2 G3
-            // 0  2  4  6   =>  0  0  0  0
-            // 1  3  5  7       1  1  1  1
-            //                  2  2  2  2
-            //                  3  3  3  3
-            //                  4  4  4  4
-            //                  5  5  5  5
-            //                  6  6  6  6
-            //                  7  7  7  7
-
-            for (uint64_t i = 0; i < count; ++i)
-            {
-                input_host_data[i] = hccl_rank * count + i;
-            }
-
-            //Copy from input_host_data_ptr to input_dev_ptr (to be used in benchmark)
-            CHECK_SYNAPSE_STATUS(synMemCopyAsync(demo_data.host_to_device_stream,
-                                                 (uint64_t) input_host_data_ptr,
-                                                 data_size,
-                                                 input_dev_ptr,
-                                                 HOST_TO_DRAM));
-
-            CHECK_SYNAPSE_STATUS(synStreamSynchronize(demo_data.host_to_device_stream));
 
             // Run HCCL AllGather collective
-            auto stat = benchmark(demo_data, [&]() {
-                CHECK_HCCL_STATUS(hcclAllGather((const void*) input_dev_ptr,
-                                                (void*) output_dev_ptr,
-                                                input_host_data.size(),
-                                                hcclFloat32,
-                                                demo_data.hccl_comm,
-                                                demo_data.collective_stream));
-            });
+            auto stat = benchmark(
+                demo_data,
+                [&](uint64_t iter) {
+                    uint64_t index = iter % number_of_buffers;
+                    CHECK_HCCL_STATUS(hcclAllGather((const void*) input_dev_ptrs[index],
+                                                    (void*) output_dev_ptrs[index],
+                                                    count,
+                                                    hcclFloat32,
+                                                    demo_data.hccl_comm,
+                                                    demo_data.collective_stream));
+                });
 
-            // Correctness check
-
-            auto        output_host_data     = vector<float>(input_host_data.size() * demo_data.nranks);
-            const void* output_host_data_ptr = reinterpret_cast<void*>(output_host_data.data());
-
-            CHECK_SYNAPSE_STATUS(
-                synHostMap(demo_data.device_handle, data_size * demo_data.nranks, output_host_data_ptr));
-            CHECK_SYNAPSE_STATUS(synMemCopyAsync(demo_data.device_to_host_stream,
-                                                 output_dev_ptr,
-                                                 data_size * demo_data.nranks,
-                                                 (uint64_t) output_host_data_ptr,
-                                                 DRAM_TO_HOST));
-            CHECK_SYNAPSE_STATUS(synStreamSynchronize(demo_data.device_to_host_stream));
-
-            for (size_t i = 0; i < output_host_data.size(); ++i)
-            {
-                if (output_host_data[i] != i)
-                {
-                    is_ok = false;
-                }
-            }
-
-            log() << "AllGather hccl_rank=" << hccl_rank << " size=" << data_size << " <float>"
-                  << " Input Buffer [" << input_host_data[0] << " " << input_host_data[1] << " " << input_host_data[2]
-                  << " " << input_host_data[3] << " ...]"
-                  << " gathered to Output Buffer [" << output_host_data[0] << " " << output_host_data[1] << " "
-                  << output_host_data[2] << " " << output_host_data[3] << " ...]"
-                  << " which is " << (is_ok ? "fine." : "bad.") << endl;
-
-            CHECK_SYNAPSE_STATUS(synHostUnmap(demo_data.device_handle, input_host_data_ptr));
-            CHECK_SYNAPSE_STATUS(synHostUnmap(demo_data.device_handle, output_host_data_ptr));
-
-            // End of correctness check
-
-            describe_stat("hcclAllGather(src!=dst, count=" + to_string(input_host_data.size()) +
+            describe_stat("hcclAllGather(src!=dst, count=" + to_string(count) +
                               ", dtype=fp32, iterations=" + to_string(demo_data.num_iters) + ")",
                           stat,
                           data_size,
@@ -1154,84 +854,20 @@ int main()
         {
             double all2all_factor = ((double) (demo_data.nranks - 1)) / ((double) demo_data.nranks);
 
-            // Fill input data, example:
-            // Input        |   Output
-            // G0 G1 G2 G3      G0 G1 G2 G3
-            // 0  2  4  6   =>  0  4  8  12
-            // 1  3  5  7       1  5  9  13
-            // 4  5  8  10      2  6  10 14
-            // 5  6  9  11      3  7  11 15
-            // 8  10 12 14      4  8  12 16
-            // 9  11 13 15      5  9  13 17
-            // 12 14 16 18      6  10 14 18
-            // 13 15 17 19      7  11 15 19
-            uint64_t chunkSize = count / demo_data.nranks;
-            for (uint64_t i = 0; i < count / chunkSize; ++i)
-            {
-                // We want to make sure we use different values on each cell and between ranks,
-                // but we don't want the summation to get too big, that is why we modulo by DATA_ELEMENTS_MAX.
-                for (uint64_t j = 0; j < chunkSize; ++j)
-                {
-                    int val                            = hccl_rank * chunkSize + j + demo_data.nranks * i;
-                    input_host_data[i * chunkSize + j] = (val % DATA_ELEMENTS_MAX);
-                }
-            }
-
-            // Copy from input_host_data_ptr to input_dev_ptr (to be used in benchmark)
-            CHECK_SYNAPSE_STATUS(synMemCopyAsync(demo_data.host_to_device_stream,
-                                                 (uint64_t) input_host_data_ptr,
-                                                 data_size,
-                                                 input_dev_ptr,
-                                                 HOST_TO_DRAM));
-            CHECK_SYNAPSE_STATUS(synStreamSynchronize(demo_data.host_to_device_stream));
-
             // Run HCCL AlltoAll collective
-            auto stat = benchmark(demo_data, [&]() {
-                CHECK_HCCL_STATUS(hcclAlltoAll((const void*) input_dev_ptr,
-                                               (void*) output_dev_ptr,
-                                               input_host_data.size(),
-                                               hcclFloat32,
-                                               demo_data.hccl_comm,
-                                               demo_data.collective_stream));
-            });
+            auto stat = benchmark(
+                demo_data,
+                [&](uint64_t iter) {
+                    uint64_t index = iter % number_of_buffers;
+                    CHECK_HCCL_STATUS(hcclAlltoAll((const void*) input_dev_ptrs[index],
+                                                   (void*) output_dev_ptrs[index],
+                                                   count,
+                                                   hcclFloat32,
+                                                   demo_data.hccl_comm,
+                                                   demo_data.collective_stream));
+                });
 
-            // Correctness check
-            auto        output_host_data     = vector<float>(input_host_data.size());
-            const void* output_host_data_ptr = reinterpret_cast<void*>(output_host_data.data());
-
-            CHECK_SYNAPSE_STATUS(synHostMap(demo_data.device_handle, data_size, output_host_data_ptr));
-            CHECK_SYNAPSE_STATUS(synMemCopyAsync(demo_data.device_to_host_stream,
-                                                 output_dev_ptr,
-                                                 data_size,
-                                                 (uint64_t) output_host_data_ptr,
-                                                 DRAM_TO_HOST));
-            CHECK_SYNAPSE_STATUS(synStreamSynchronize(demo_data.device_to_host_stream));
-
-            int start = hccl_rank * (count / chunkSize);
-            int expected;
-
-            for (size_t i = 0; i < output_host_data.size(); ++i)
-            {
-                expected = ((start + i) % DATA_ELEMENTS_MAX);
-                if ((float) output_host_data[i] != (float) expected)
-                {
-                    is_ok = false;
-                }
-            }
-
-            log() << "All2All hccl_rank=" << hccl_rank << " size=" << data_size << " <float>"
-                  << " Input Buffer [" << input_host_data[0] << " " << input_host_data[1] << " " << input_host_data[2]
-                  << " " << input_host_data[3] << " ...]"
-                  << " distributed to Output Buffer [" << output_host_data[0] << " " << output_host_data[1] << " "
-                  << output_host_data[2] << " " << output_host_data[3] << " ...]"
-                  << " which is " << (is_ok ? "fine." : "bad.") << endl;
-
-            CHECK_SYNAPSE_STATUS(synHostUnmap(demo_data.device_handle, input_host_data_ptr));
-            CHECK_SYNAPSE_STATUS(synHostUnmap(demo_data.device_handle, output_host_data_ptr));
-
-            // End of correctness check
-
-            describe_stat("hcclAlltoAll(src!=dst, count=" + to_string(input_host_data.size()) +
+            describe_stat("hcclAlltoAll(src!=dst, count=" + to_string(count) +
                               ", dtype=fp32, iterations=" + to_string(demo_data.num_iters) + ")",
                           stat,
                           data_size,
@@ -1250,117 +886,46 @@ int main()
                 {
                     log() << "Will perform ranks send_recv test with list: " << get_ranks_list() << std::endl;
                 }
-                is_ok = send_recv_ranks_test_driver(demo_data,
-                                                    test_type,
-                                                    hccl_rank,
-                                                    data_size,
-                                                    count,
-                                                    input_host_data,
-                                                    input_dev_ptr,
-                                                    output_dev_ptr);
+                send_recv_ranks_test_driver(demo_data,
+                                            test_type,
+                                            hccl_rank,
+                                            data_size,
+                                            count,
+                                            input_dev_ptrs,
+                                            output_dev_ptrs);
             }
             else
             {
-                is_ok = send_recv_test_driver(demo_data,
-                                              test_type,
-                                              hccl_rank,
-                                              data_size,
-                                              count,
-                                              input_host_data,
-                                              input_dev_ptr,
-                                              output_dev_ptr);
+                send_recv_test_driver(demo_data,
+                                      test_type,
+                                      hccl_rank,
+                                      data_size,
+                                      count,
+                                      input_dev_ptrs,
+                                      output_dev_ptrs);
             }
         }
         else if (test_type == "reduce")
         {
             double reduce_factor = 1;
             int    root          = get_demo_test_root();
-            // Fill input data, example:
-            // root = G1
-            // Input        |   Output
-            // G0 G1 G2 G3      G0 G1 G2 G3
-            // 0  1  2  3   =>      6
-            // 4  5  6  7          22
-            // 8  9  10 11         38
-            // 12 13 14 15         54
-
-            for (uint64_t i = 0; i < count; ++i)
-            {
-                input_host_data[i] = hccl_rank + (demo_data.nranks * (i % DATA_ELEMENTS_MAX));
-            }
-
-            // Copy from input_host_data_ptr to input_dev_ptr (to be used in benchmark)
-            CHECK_SYNAPSE_STATUS(synMemCopyAsync(demo_data.host_to_device_stream,
-                                                 (uint64_t) input_host_data_ptr,
-                                                 data_size,
-                                                 input_dev_ptr,
-                                                 HOST_TO_DRAM));
-
-            CHECK_SYNAPSE_STATUS(synStreamSynchronize(demo_data.host_to_device_stream));
 
             // Run HCCL Reduce collective
-            auto stat = benchmark(demo_data, [&]() {
-                CHECK_HCCL_STATUS(hcclReduce((const void*) input_dev_ptr,
-                                             (void*) output_dev_ptr,
-                                             input_host_data.size(),
-                                             hcclFloat32,
-                                             hcclSum,
-                                             root,
-                                             demo_data.hccl_comm,
-                                             demo_data.collective_stream));
-            });
+            auto stat = benchmark(
+                demo_data,
+                [&](uint64_t iter) {
+                    uint64_t index = iter % number_of_buffers;
+                    CHECK_HCCL_STATUS(hcclReduce((const void*) input_dev_ptrs[index],
+                                                 (void*) output_dev_ptrs[index],
+                                                 count,
+                                                 hcclFloat32,
+                                                 hcclSum,
+                                                 root,
+                                                 demo_data.hccl_comm,
+                                                 demo_data.collective_stream));
+                });
 
-            // Correctness check
-
-            auto        output_host_data     = std::vector<float>(input_host_data.size());
-            const void* output_host_data_ptr = reinterpret_cast<void*>(output_host_data.data());
-
-            log() << "Reduce hccl_rank=" << hccl_rank << " root=" << root << " size=" << data_size << " <float>"
-                  << " Input Buffer [" << input_host_data[0] << " " << input_host_data[1] << " " << input_host_data[2]
-                  << " " << input_host_data[3] << " ...]";
-
-            // The correctness check is relevant for the root's output buffer only
-            if (hccl_rank == root)
-            {
-                CHECK_SYNAPSE_STATUS(synHostMap(demo_data.device_handle, data_size, output_host_data_ptr));
-                CHECK_SYNAPSE_STATUS(synMemCopyAsync(demo_data.device_to_host_stream,
-                                                     output_dev_ptr,
-                                                     data_size,
-                                                     (uint64_t) output_host_data_ptr,
-                                                     DRAM_TO_HOST));
-                CHECK_SYNAPSE_STATUS(synStreamSynchronize(demo_data.device_to_host_stream));
-
-                int start = 0;
-                int end   = demo_data.nranks - 1;
-                int expected;
-                int addCommSize;
-
-                for (size_t i = 0; i < input_host_data.size(); ++i)
-                {
-                    addCommSize = demo_data.nranks * (i % DATA_ELEMENTS_MAX);
-                    // Arithmetic progression
-                    expected = ((start + addCommSize) + (end + addCommSize)) * demo_data.nranks / 2;
-                    if (std::abs(output_host_data[i] - expected) != 0)
-                    {
-                        is_ok = false;
-                    }
-                }
-
-                log() << " Output Buffer [" << output_host_data[0] << " " << output_host_data[1] << " "
-                      << output_host_data[2] << " " << output_host_data[3] << " ...]"
-                      << " which is " << (is_ok ? "fine." : "bad.") << std::endl;
-            }
-            else
-            {
-                log() << std::endl;
-            }
-
-            CHECK_SYNAPSE_STATUS(synHostUnmap(demo_data.device_handle, input_host_data_ptr));
-            CHECK_SYNAPSE_STATUS(synHostUnmap(demo_data.device_handle, output_host_data_ptr));
-
-            // End of correctness check
-
-            describe_stat("Reduce(count=" + std::to_string(input_host_data.size()) +
+            describe_stat("Reduce(count=" + std::to_string(count) +
                               ", dtype=fp32, iterations=" + std::to_string(demo_data.num_iters) + ")",
                           stat,
                           data_size,
@@ -1384,6 +949,8 @@ int main()
 
         CHECK_SYNAPSE_STATUS(synDeviceFree(demo_data.device_handle, input_dev_ptr, 0));
         CHECK_SYNAPSE_STATUS(synDeviceFree(demo_data.device_handle, output_dev_ptr, 0));
+        input_dev_ptrs.clear();
+        output_dev_ptrs.clear();
 
         // Clean up HCCL
         CHECK_SYNAPSE_STATUS(synDeviceRelease(demo_data.device_handle));
@@ -1395,10 +962,6 @@ int main()
         CHECK_MPI_STATUS(MPI_Finalize());
 #endif  // MPI_ENABLED
 
-        if (!is_ok)
-        {
-            throw runtime_error {"Collective operation has failed on corretness."};
-        }
     }
     catch (const exception& ex)
     {
