@@ -191,7 +191,7 @@ main()
       fi
       if [ ! -d $output_path ];
       then
-         mkdir -m 777 $output_path
+         mkdir -p -m 777 $output_path
       fi
       output_file="${output_path}/.habana_moduleID0"
       if [ ! -f $output_file ];

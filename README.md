@@ -3,9 +3,9 @@ HCCL demo is a program that demonstrates HCCL usage and supports communication v
 based scale-out or Host NIC scale-out.
 
 This README provides HCCL demo setup and usage as well as example run commands. In<br />
-addition, it provides further setup steps required when using Host NIC Scale out.<br />  
-Host NIC Scale out is achieved using OFI. [Host NIC Scale-Out Setup](#Host-NIC-Scale-Out-Setup)<br /> 
-section details the steps required to download, install and build OFI. It also provides<br />  
+addition, it provides further setup steps required when using Host NIC Scale out.<br />
+Host NIC Scale out is achieved using OFI. [Host NIC Scale-Out Setup](#Host-NIC-Scale-Out-Setup)<br />
+section details the steps required to download, install and build OFI. It also provides<br />
 the required environment variables to run Host NIC scale-out with EFA Peer Direct.<br />
 
 ## Supported Collective Operations
@@ -148,7 +148,7 @@ This mode is supported with EFA provider if the following conditions are met:
     --node_id          - int, ID of the running host. Each host should have unique id between 0-num_nodes
     --test             - str, Which hccl test to run (for example: broadcast/all_reduce) (default: broadcast)
     --size             - str, Data size in units of G,M,K,B or no unit (default: 33554432 Bytes)
-    --loop             - int, Number of iterations (default: 10)
+    --loop             - int, Number of iterations (must be positive, default: 10)
     --ranks_list       - str, Comma separated list of pairs of ranks for send_recv ranks test only, e.g. 0,8,1,8 (optional, default is to perform regular send_recv test with all ranks)
     --test_root        - int, Index of root rank for broadcast and reduce tests
     --csv_path         - str, Path to a file for results output
@@ -189,14 +189,6 @@ Configuration: One server with 8 ranks, 32 MB size, all_reduce collective, 1000 
 
 Output example:
 
-    Allreduce hccl_rank=4 size=33554432 <float> Input Buffer [4 12 20 28 ...] reduced to Output Buffer [28 92 156 220 ...] which is fine.
-    Allreduce hccl_rank=5 size=33554432 <float> Input Buffer [5 13 21 29 ...] reduced to Output Buffer [28 92 156 220 ...] which is fine.
-    Allreduce hccl_rank=1 size=33554432 <float> Input Buffer [1 9 17 25 ... ] reduced to Output Buffer [28 92 156 220 ...] which is fine.
-    Allreduce hccl_rank=3 size=33554432 <float> Input Buffer [3 11 19 27 ...] reduced to Output Buffer [28 92 156 220 ...] which is fine.
-    Allreduce hccl_rank=2 size=33554432 <float> Input Buffer [2 10 18 26 ...] reduced to Output Buffer [28 92 156 220 ...] which is fine.
-    Allreduce hccl_rank=0 size=33554432 <float> Input Buffer [0 8 16 24 ... ] reduced to Output Buffer [28 92 156 220 ...] which is fine.
-    Allreduce hccl_rank=7 size=33554432 <float> Input Buffer [7 15 23 31 ...] reduced to Output Buffer [28 92 156 220 ...] which is fine.
-    Allreduce hccl_rank=6 size=33554432 <float> Input Buffer [6 14 22 30 ...] reduced to Output Buffer [28 92 156 220 ...] which is fine.
     ###############################################################################
     [BENCHMARK] hcclAllReduce(src!=dst, count=8388608, dtype=fp32, iterations=1000)
     [BENCHMARK]     NW Bandwidth   : <Test results> MB/s
@@ -224,30 +216,11 @@ Second server command:
 
 First server output:
 
-    Allreduce hccl_rank=0 size=33554432 <float> Input Buffer [0 16 32 48 ...] reduced to Output Buffer [120 376 632 888 ...] which is fine.
-    Allreduce hccl_rank=3 size=33554432 <float> Input Buffer [3 19 35 51 ...] reduced to Output Buffer [120 376 632 888 ...] which is fine.
-    Allreduce hccl_rank=7 size=33554432 <float> Input Buffer [7 23 39 55 ...] reduced to Output Buffer [120 376 632 888 ...] which is fine.
-    Allreduce hccl_rank=4 size=33554432 <float> Input Buffer [4 20 36 52 ...] reduced to Output Buffer [120 376 632 888 ...] which is fine.
-    Allreduce hccl_rank=6 size=33554432 <float> Input Buffer [6 22 38 54 ...] reduced to Output Buffer [120 376 632 888 ...] which is fine.
-    Allreduce hccl_rank=1 size=33554432 <float> Input Buffer [1 17 33 49 ...] reduced to Output Buffer [120 376 632 888 ...] which is fine.
-    Allreduce hccl_rank=2 size=33554432 <float> Input Buffer [2 18 34 50 ...] reduced to Output Buffer [120 376 632 888 ...] which is fine.
-    Allreduce hccl_rank=5 size=33554432 <float> Input Buffer [5 21 37 53 ...] reduced to Output Buffer [120 376 632 888 ...] which is fine.
     ###############################################################################
     [BENCHMARK] hcclAllReduce(src!=dst, count=8388608, dtype=fp32, iterations=1000)
     [BENCHMARK]     NW Bandwidth     : <Test results> MB/s
     [BENCHMARK]     Algo Bandwidth   : <Test results> MB/s
     ###############################################################################
-
-Second server output:
-
-    Allreduce hccl_rank=13 size=33554432 <float> Input Buffer [13 29 45 61 ...] reduced to Output Buffer [120 376 632 888 ...] which is fine.
-    Allreduce hccl_rank=12 size=33554432 <float> Input Buffer [12 28 44 60 ...] reduced to Output Buffer [120 376 632 888 ...] which is fine.
-    Allreduce hccl_rank=11 size=33554432 <float> Input Buffer [11 27 43 59 ...] reduced to Output Buffer [120 376 632 888 ...] which is fine.
-    Allreduce hccl_rank=15 size=33554432 <float> Input Buffer [15 31 47 63 ...] reduced to Output Buffer [120 376 632 888 ...] which is fine.
-    Allreduce hccl_rank=9 size=33554432 <float> Input Buffer  [9 25 41 57 ... ] reduced to Output Buffer [120 376 632 888 ...] which is fine.
-    Allreduce hccl_rank=8 size=33554432 <float> Input Buffer  [8 24 40 56 ... ] reduced to Output Buffer [120 376 632 888 ...] which is fine.
-    Allreduce hccl_rank=14 size=33554432 <float> Input Buffer [14 30 46 62 ...] reduced to Output Buffer [120 376 632 888 ...] which is fine.
-    Allreduce hccl_rank=10 size=33554432 <float> Input Buffer [10 26 42 58 ...] reduced to Output Buffer [120 376 632 888 ...] which is fine.
 
 ## Examples - MPI mode
 
@@ -264,14 +237,6 @@ Configuration: One server with 8 ranks, 32 MB size, all_reduce collective, 1000 
 
 Output example:
 
-    Allreduce hccl_rank=4 size=33554432 <float> Input Buffer [4 12 20 28 ...] reduced to Output Buffer [28 92 156 220 ...] which is fine.
-    Allreduce hccl_rank=5 size=33554432 <float> Input Buffer [5 13 21 29 ...] reduced to Output Buffer [28 92 156 220 ...] which is fine.
-    Allreduce hccl_rank=1 size=33554432 <float> Input Buffer [1 9 17 25 ... ] reduced to Output Buffer [28 92 156 220 ...] which is fine.
-    Allreduce hccl_rank=3 size=33554432 <float> Input Buffer [3 11 19 27 ...] reduced to Output Buffer [28 92 156 220 ...] which is fine.
-    Allreduce hccl_rank=2 size=33554432 <float> Input Buffer [2 10 18 26 ...] reduced to Output Buffer [28 92 156 220 ...] which is fine.
-    Allreduce hccl_rank=0 size=33554432 <float> Input Buffer [0 8 16 24 ... ] reduced to Output Buffer [28 92 156 220 ...] which is fine.
-    Allreduce hccl_rank=7 size=33554432 <float> Input Buffer [7 15 23 31 ...] reduced to Output Buffer [28 92 156 220 ...] which is fine.
-    Allreduce hccl_rank=6 size=33554432 <float> Input Buffer [6 14 22 30 ...] reduced to Output Buffer [28 92 156 220 ...] which is fine.
     ###############################################################################
     [BENCHMARK] hcclAllReduce(src!=dst, count=8388608, dtype=fp32, iterations=1000)
     [BENCHMARK]     NW Bandwidth     : <Test results> MB/s
@@ -296,27 +261,8 @@ Second option using MPI host:
 
 First server output:
 
-    Allreduce hccl_rank=0 size=33554432 <float> Input Buffer [0 16 32 48 ...] reduced to Output Buffer [120 376 632 888 ...] which is fine.
-    Allreduce hccl_rank=3 size=33554432 <float> Input Buffer [3 19 35 51 ...] reduced to Output Buffer [120 376 632 888 ...] which is fine.
-    Allreduce hccl_rank=7 size=33554432 <float> Input Buffer [7 23 39 55 ...] reduced to Output Buffer [120 376 632 888 ...] which is fine.
-    Allreduce hccl_rank=4 size=33554432 <float> Input Buffer [4 20 36 52 ...] reduced to Output Buffer [120 376 632 888 ...] which is fine.
-    Allreduce hccl_rank=6 size=33554432 <float> Input Buffer [6 22 38 54 ...] reduced to Output Buffer [120 376 632 888 ...] which is fine.
-    Allreduce hccl_rank=1 size=33554432 <float> Input Buffer [1 17 33 49 ...] reduced to Output Buffer [120 376 632 888 ...] which is fine.
-    Allreduce hccl_rank=2 size=33554432 <float> Input Buffer [2 18 34 50 ...] reduced to Output Buffer [120 376 632 888 ...] which is fine.
-    Allreduce hccl_rank=5 size=33554432 <float> Input Buffer [5 21 37 53 ...] reduced to Output Buffer [120 376 632 888 ...] which is fine.
     ###############################################################################
     [BENCHMARK] hcclAllReduce(src!=dst, count=8388608, dtype=fp32, iterations=1000)
     [BENCHMARK]     NW Bandwidth     : <Test results> MB/s
     [BENCHMARK]     Algo Bandwidth   : <Test results> MB/s
     ###############################################################################
-
-Second server output:
-
-    Allreduce hccl_rank=13 size=33554432 <float> Input Buffer [13 29 45 61 ...] reduced to Output Buffer [120 376 632 888 ...] which is fine.
-    Allreduce hccl_rank=12 size=33554432 <float> Input Buffer [12 28 44 60 ...] reduced to Output Buffer [120 376 632 888 ...] which is fine.
-    Allreduce hccl_rank=11 size=33554432 <float> Input Buffer [11 27 43 59 ...] reduced to Output Buffer [120 376 632 888 ...] which is fine.
-    Allreduce hccl_rank=15 size=33554432 <float> Input Buffer [15 31 47 63 ...] reduced to Output Buffer [120 376 632 888 ...] which is fine.
-    Allreduce hccl_rank=9 size=33554432 <float> Input Buffer  [9 25 41 57 ... ] reduced to Output Buffer [120 376 632 888 ...] which is fine.
-    Allreduce hccl_rank=8 size=33554432 <float> Input Buffer  [8 24 40 56 ... ] reduced to Output Buffer [120 376 632 888 ...] which is fine.
-    Allreduce hccl_rank=14 size=33554432 <float> Input Buffer [14 30 46 62 ...] reduced to Output Buffer [120 376 632 888 ...] which is fine.
-    Allreduce hccl_rank=10 size=33554432 <float> Input Buffer [10 26 42 58 ...] reduced to Output Buffer [120 376 632 888 ...] which is fine.
