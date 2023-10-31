@@ -16,6 +16,7 @@
 #include <sstream>
 #include <numeric>
 #include <fstream>
+#include <cmath>  // for pow
 
 // HCCL :: Habana Collective Communications Library
 #include <hccl.h>
@@ -29,12 +30,16 @@
 
 #define DATA_ELEMENTS_MAX 13
 #define DEFAULT_TEST_SIZE 33554432
+#define DEFAULT_TEST_SIZE_RANGE_MIN 0
+#define DEFAULT_TEST_SIZE_RANGE_MAX 0
+#define DEFAULT_TEST_SIZE_RANGE_INC 1
 #define DEFAULT_TEST_LOOP 10
 #define DEFAULT_BOX_SIZE  8
 #define ALLOCATE_HBM_SIZE    (1024*1024*1024)  // 1G
 #define AMOUNT_JUMBO_BUFFERS (2)
 
-constexpr int INVALID_RANK = -1;
+constexpr int INVALID_RANK    = -1;
+constexpr int master_mpi_rank = 0;
 
 #if MPI_ENABLED
 // Open MPI (v4.0.2)
@@ -87,6 +92,19 @@ struct hccl_demo_stats
     float  rank_duration_in_sec;
     size_t num_iters;
 };
+
+struct hccl_demo_report_entry
+{
+    uint64_t data_size;
+    uint64_t count;
+    float    time;
+    double   algo_bw;
+    double   avg_bw;
+    string   data_type;
+    string   reduction_op;
+};
+
+vector<hccl_demo_report_entry> report_entry_vec;
 
 ostream& log()
 {
@@ -242,6 +260,64 @@ uint64_t get_demo_test_size()
     return test_size;
 }
 
+uint64_t get_demo_size_min()
+{
+    static bool     is_cached     = false;
+    static uint64_t test_size_min = DEFAULT_TEST_SIZE_RANGE_MIN;
+    if (!is_cached)
+    {
+        char* env_value = getenv("HCCL_SIZE_RANGE_MIN");
+        test_size_min   = (env_value != nullptr) ? strtoull(env_value, NULL, 0) : test_size_min;
+        is_cached       = true;
+    }
+    return test_size_min;
+}
+
+uint64_t get_demo_size_max()
+{
+    static bool     is_cached     = false;
+    static uint64_t test_size_max = DEFAULT_TEST_SIZE_RANGE_MAX;
+    if (!is_cached)
+    {
+        char* env_value = getenv("HCCL_SIZE_RANGE_MAX");
+        test_size_max   = (env_value != nullptr) ? strtoull(env_value, NULL, 0) : test_size_max;
+        is_cached       = true;
+    }
+    return test_size_max;
+}
+
+uint64_t get_demo_size_inc()
+{
+    static bool     is_cached     = false;
+    static uint64_t test_size_inc = DEFAULT_TEST_SIZE_RANGE_INC;
+    if (!is_cached)
+    {
+        char* env_value = getenv("HCCL_SIZE_RANGE_INC");
+        test_size_inc   = (env_value != nullptr) ? strtoull(env_value, NULL, 0) : test_size_inc;
+        is_cached       = true;
+    }
+    return test_size_inc;
+}
+
+bool is_master_rank(const int hccl_rank)
+{
+    if (hccl_rank == master_mpi_rank) return true;
+    return false;
+}
+
+bool should_write_report(const int hccl_rank)
+{
+    static bool is_cached   = false;
+    static bool should_write_report = false;
+    if (!is_cached)
+    {
+        should_write_report = is_master_rank(hccl_rank) && get_demo_size_min() > 0 && get_demo_size_max() > 0;
+        is_cached   = true;
+    }
+
+    return should_write_report;
+}
+
 int get_demo_test_loop()
 {
     static bool is_cached = false;
@@ -327,6 +403,55 @@ std::string get_ranks_list()
     return (env_value != nullptr) ? string(env_value) : default_ranks_list;
 }
 
+void print_report(const string& collective_op, const size_t num_iters)
+{
+    constexpr size_t column_width = 14;
+    const bool       is_reduction_op =
+        collective_op.find("reduce") != std::string::npos;  // reduce, all_reduce, reduce_scatter
+
+    const static vector<string> header = {"size", "count", "type", "redop", "time", "algo_bw", "nw_bw"};
+    const static vector<string> units  = {"(B)", "(elements)", "", "", "(us)", "(GB/s)", "(GB/s)"};
+
+    stringstream ss;
+    const string summary   = "[SUMMARY REPORT]";
+    const string stat_name = "(src!=dst, collective=" + collective_op + ", iterations=" + to_string(num_iters) + ")";
+    size_t       delimiter_size = stat_name.length() + 1;
+    ss << '\n' << get_print_delimiter(delimiter_size, '#') << endl;
+    ss << summary << '\n' << stat_name << '\n' << endl;
+    ss << left;
+
+    // print header
+    for (size_t i = 0; i < header.size(); ++i)
+    {
+        if (!is_reduction_op && header[i] == "redop") continue;
+        ss << setw(column_width) << header[i];
+    }
+    ss << endl;
+
+    // print units
+    for (size_t i = 0; i < units.size(); ++i)
+    {
+        if (!is_reduction_op && header[i] == "redop") continue;
+        ss << setw(column_width) << units[i];
+    }
+    ss << endl;
+
+    // print stats for each data size
+    for (const auto& entry : report_entry_vec)
+    {
+        ss << setw(column_width) << to_string(entry.data_size) << setw(column_width) << to_string(entry.count)
+           << setw(column_width) << entry.data_type;
+        if (is_reduction_op )
+        {
+            ss << setw(column_width) << entry.reduction_op;
+        }
+        ss << setw(column_width) << fixed << setprecision(3) << entry.time * 1000 << setw(column_width) << fixed
+           << setprecision(6) << entry.algo_bw / 1e9 << setw(column_width) << fixed << setprecision(6)
+           << entry.avg_bw / 1e9 << endl;
+    }
+    log() << ss.str();
+}
+
 void describe_stat(const string&          stat_name,
                    const hccl_demo_stats& stats,
                    size_t                 data_size,
@@ -334,15 +459,21 @@ void describe_stat(const string&          stat_name,
                    int                    hccl_rank,
                    int                    loop,
                    const string&          test_type,
-                   const string&          dtype,
+                   const string&          data_type,
+                   const string&          reduction_op,
                    const bool             reportingRank)
 {
     auto algo_bandwidth = (double) data_size / stats.avg_duration_in_sec;
     auto avg_bandwidth  = algo_bandwidth * factor;
-    auto rank_bandwith = (double) data_size / stats.rank_duration_in_sec;
-    rank_bandwith      = rank_bandwith * factor;
+    auto rank_bandwith  = (double) data_size / stats.rank_duration_in_sec;
+    rank_bandwith       = rank_bandwith * factor;
+    bool write_report   = should_write_report(hccl_rank);
 
-    if (reportingRank)
+    if (write_report)
+    {
+        log() << "Processing data_size " << data_size << endl;
+    }
+    else if (reportingRank)
     {
         stringstream ss;
         sleep(1);
@@ -361,9 +492,22 @@ void describe_stat(const string&          stat_name,
     {
         ofstream output;
         output.open(csv_path, ofstream::out | ofstream::app);
-        output << test_type << "," << hccl_rank << "," << dtype << "," << data_size << "," << loop << ","
+        output << test_type << "," << hccl_rank << "," << data_type << "," << data_size << "," << loop << ","
                << format_bw(rank_bandwith) << endl;
         output.close();
+    }
+
+    // keep the entry for the report
+    if (write_report)
+    {
+        hccl_demo_report_entry report_entry = {data_size,
+                                               (uint64_t)(data_size / sizeof(float)),
+                                               stats.avg_duration_in_sec,
+                                               algo_bandwidth,
+                                               avg_bandwidth,
+                                               data_type,
+                                               reduction_op};
+        report_entry_vec.push_back(report_entry);
     }
 }
 
@@ -482,7 +626,7 @@ static void send_recv_test_driver(hccl_demo_data&             demo_data,
                                              sendToRank));
         });
 
-    describe_stat("hcclSendRecv(src!=dst, count=" + to_string(count) +
+    describe_stat("hcclSendRecv(src!=dst, data_size=" + to_string(data_size) + ", count=" + to_string(count) +
                       ", dtype=fp32, iterations=" + to_string(demo_data.num_iters) + ")",
                   stat,
                   data_size,
@@ -491,6 +635,7 @@ static void send_recv_test_driver(hccl_demo_data&             demo_data,
                   demo_data.num_iters,
                   test_type,
                   "float",
+                  "",
                   should_report_stat(hccl_rank));
 }
 
@@ -619,7 +764,7 @@ static void send_recv_ranks_test_driver(hccl_demo_data&             demo_data,
                                                sendToRanks));
     });
 
-    describe_stat("hcclSendRecv(src!=dst, count=" + to_string(count) +
+    describe_stat("hcclSendRecv(src!=dst, data_size=" + to_string(data_size) + ", count=" + to_string(count) +
                       ", dtype=fp32, iterations=" + to_string(demo_data.num_iters) + ")",
                   stat,
                   data_size,
@@ -628,6 +773,7 @@ static void send_recv_ranks_test_driver(hccl_demo_data&             demo_data,
                   demo_data.num_iters,
                   test_type,
                   "float",
+                  "",
                   ((hccl_rank == reportingReceiverRank) || (hccl_rank == reportingSenderRank)));
 }
 
@@ -651,8 +797,8 @@ int main()
 #endif  //MPI_ENABLED
 
         hccl_demo_data demo_data;
-        demo_data.nranks    = get_nranks();
-        demo_data.num_iters = get_demo_test_loop();
+        demo_data.nranks     = get_nranks();
+        demo_data.num_iters  = get_demo_test_loop();
         demo_data.ranks_list = get_ranks_list();
 
         const int hccl_rank = get_hccl_rank();
@@ -671,20 +817,13 @@ int main()
         }
 #endif
         // Create Streams
-        CHECK_SYNAPSE_STATUS(
-            synStreamCreateGeneric(&demo_data.collective_stream, demo_data.device_handle, 0));
-        CHECK_SYNAPSE_STATUS(synStreamCreateGeneric(&demo_data.device_to_host_stream,
-                                             demo_data.device_handle,
-                                             0));
-        CHECK_SYNAPSE_STATUS(synStreamCreateGeneric(&demo_data.host_to_device_stream,
-                                             demo_data.device_handle,
-                                             0));
+        CHECK_SYNAPSE_STATUS(synStreamCreateGeneric(&demo_data.collective_stream, demo_data.device_handle, 0));
+        CHECK_SYNAPSE_STATUS(synStreamCreateGeneric(&demo_data.device_to_host_stream, demo_data.device_handle, 0));
+        CHECK_SYNAPSE_STATUS(synStreamCreateGeneric(&demo_data.host_to_device_stream, demo_data.device_handle, 0));
 
         // Generate unique id
-        hcclUniqueId  unique_id {};
-        constexpr int master_mpi_rank = 0;
-
-        if (hccl_rank == master_mpi_rank)
+        hcclUniqueId unique_id {};
+        if (is_master_rank(hccl_rank))
         {
             CHECK_HCCL_STATUS(hcclGetUniqueId(&unique_id));
         }
@@ -696,53 +835,56 @@ int main()
         // Create new HCCL communicator
         CHECK_HCCL_STATUS(hcclCommInitRank(&demo_data.hccl_comm, demo_data.nranks, unique_id, hccl_rank));
 
-        uint64_t input_dev_ptr {};
-        uint64_t output_dev_ptr {};
+        uint64_t              input_dev_ptr {};
+        uint64_t              output_dev_ptr {};
         std::vector<uint64_t> input_dev_ptrs;
         std::vector<uint64_t> output_dev_ptrs;
 
+        const uint64_t test_size     = get_demo_test_size();
+        const uint64_t size_min      = get_demo_size_min() ? get_demo_size_min() : test_size;
+        const uint64_t size_max      = get_demo_size_max() ? get_demo_size_max() : test_size;
+        const uint64_t data_size_inc = get_demo_size_inc();
+
         // Allocate buffers on the HPU device
-        const uint64_t data_size           = get_demo_test_size();  // bytes
-        string         test_type           = get_demo_test_type();
-        uint64_t    count               = data_size / sizeof(float);
+        string test_type = get_demo_test_type();
 
-        const uint64_t output_size     = (test_type == "all_gather") ? data_size * demo_data.nranks : data_size;
-        uint64_t       max_buffer_size = std::max(data_size, output_size);
+        // clear report vector
+        report_entry_vec.clear();
 
-        uint64_t number_of_buffers = 1;
-        if (max_buffer_size < ALLOCATE_HBM_SIZE)
+        for (double size = size_min; size <= size_max; size = size * pow(2, data_size_inc))
         {
-            if ((ALLOCATE_HBM_SIZE / max_buffer_size) <= 2)
+            const uint64_t data_size = (uint64_t) size;
+
+            const uint64_t count           = data_size / sizeof(float);
+            const uint64_t output_size     = (test_type == "all_gather") ? data_size * demo_data.nranks : data_size;
+            const uint64_t max_buffer_size = std::max(data_size, output_size);
+
+            uint64_t number_of_buffers = 1;
+            if (max_buffer_size < ALLOCATE_HBM_SIZE)
             {
-                number_of_buffers = AMOUNT_JUMBO_BUFFERS;
+                number_of_buffers = (ALLOCATE_HBM_SIZE / max_buffer_size) <= 2 ? AMOUNT_JUMBO_BUFFERS
+                                                                               : ALLOCATE_HBM_SIZE / max_buffer_size;
             }
-            else
+
+            CHECK_SYNAPSE_STATUS(
+                synDeviceMalloc(demo_data.device_handle, data_size * number_of_buffers, 0, 0, &input_dev_ptr));
+            CHECK_SYNAPSE_STATUS(
+                synDeviceMalloc(demo_data.device_handle, output_size * number_of_buffers, 0, 0, &output_dev_ptr));
+
+            for (uint64_t index = 0; index < number_of_buffers; index++)
             {
-                number_of_buffers = ALLOCATE_HBM_SIZE / max_buffer_size;
+                input_dev_ptrs.push_back(input_dev_ptr + (index * data_size));
+                output_dev_ptrs.push_back(output_dev_ptr + (index * output_size));
             }
-        }
 
-        CHECK_SYNAPSE_STATUS(
-            synDeviceMalloc(demo_data.device_handle, data_size * number_of_buffers, 0, 0, &input_dev_ptr));
-        CHECK_SYNAPSE_STATUS(
-            synDeviceMalloc(demo_data.device_handle, output_size * number_of_buffers, 0, 0, &output_dev_ptr));
+            const bool is_root_rank = should_report_stat(hccl_rank);
+            if (test_type == "broadcast")
+            {
+                double broadcast_factor = 1;
+                int    root             = get_demo_test_root();
 
-        for (uint64_t index = 0; index < number_of_buffers; index++)
-        {
-            input_dev_ptrs.push_back(input_dev_ptr + (index * data_size));
-            output_dev_ptrs.push_back(output_dev_ptr + (index * output_size));
-        }
-
-        const bool is_root_rank = should_report_stat(hccl_rank);
-        if (test_type == "broadcast")
-        {
-            double broadcast_factor = 1;
-            int    root             = get_demo_test_root();
-
-            // Run HCCL Broadcast collective
-            auto stat = benchmark(
-                demo_data,
-                [&](uint64_t iter) {
+                // Run HCCL Broadcast collective
+                auto stat = benchmark(demo_data, [&](uint64_t iter) {
                     uint64_t index = iter % number_of_buffers;
                     CHECK_HCCL_STATUS(hcclBroadcast((const void*) input_dev_ptrs[index],
                                                     (void*) output_dev_ptrs[index],
@@ -753,25 +895,24 @@ int main()
                                                     demo_data.collective_stream));
                 });
 
-            describe_stat("Broadcast(count=" + to_string(count) +
-                              ", dtype=fp32, iterations=" + to_string(demo_data.num_iters) + ")",
-                          stat,
-                          data_size,
-                          broadcast_factor,
-                          hccl_rank,
-                          demo_data.num_iters,
-                          test_type,
-                          "float",
-                          is_root_rank);
-        }
-        else if (test_type == "all_reduce")
-        {
-            double allreduce_factor = ((double) (2 * (demo_data.nranks - 1))) / ((double) demo_data.nranks);
+                describe_stat("Broadcast(data_size=" + to_string(data_size) + ", count=" + to_string(count) +
+                                  ", dtype=fp32, iterations=" + to_string(demo_data.num_iters) + ")",
+                              stat,
+                              data_size,
+                              broadcast_factor,
+                              hccl_rank,
+                              demo_data.num_iters,
+                              test_type,
+                              "float",
+                              "",
+                              is_root_rank);
+            }
+            else if (test_type == "all_reduce")
+            {
+                double allreduce_factor = ((double) (2 * (demo_data.nranks - 1))) / ((double) demo_data.nranks);
 
-            // Run HCCL AllReduce collective
-            auto stat = benchmark(
-                demo_data,
-                [&](uint64_t iter) {
+                // Run HCCL AllReduce collective
+                auto stat = benchmark(demo_data, [&](uint64_t iter) {
                     uint64_t index = iter % number_of_buffers;
                     CHECK_HCCL_STATUS(hcclAllReduce((const void*) input_dev_ptrs[index],
                                                     (void*) output_dev_ptrs[index],
@@ -782,25 +923,24 @@ int main()
                                                     demo_data.collective_stream));
                 });
 
-            describe_stat("hcclAllReduce(src!=dst, count=" + to_string(count) +
-                              ", dtype=fp32, iterations=" + to_string(demo_data.num_iters) + ")",
-                          stat,
-                          data_size,
-                          allreduce_factor,
-                          hccl_rank,
-                          demo_data.num_iters,
-                          test_type,
-                          "float",
-                          is_root_rank);
-        }
-        else if (test_type == "reduce_scatter")
-        {
-            double reduce_scatter_factor = ((double) (demo_data.nranks - 1)) / ((double) demo_data.nranks);
+                describe_stat("hcclAllReduce(src!=dst, data_size=" + to_string(data_size) + ", count=" +
+                                  to_string(count) + ", dtype=fp32, iterations=" + to_string(demo_data.num_iters) + ")",
+                              stat,
+                              data_size,
+                              allreduce_factor,
+                              hccl_rank,
+                              demo_data.num_iters,
+                              test_type,
+                              "float",
+                              "sum",
+                              is_root_rank);
+            }
+            else if (test_type == "reduce_scatter")
+            {
+                double reduce_scatter_factor = ((double) (demo_data.nranks - 1)) / ((double) demo_data.nranks);
 
-            // Run HCCL ReduceScatter collective
-            auto stat = benchmark(
-                demo_data,
-                [&](uint64_t iter) {
+                // Run HCCL ReduceScatter collective
+                auto stat = benchmark(demo_data, [&](uint64_t iter) {
                     uint64_t index = iter % number_of_buffers;
                     CHECK_HCCL_STATUS(hcclReduceScatter((const void*) input_dev_ptrs[index],
                                                         (void*) output_dev_ptrs[index],
@@ -811,25 +951,24 @@ int main()
                                                         demo_data.collective_stream));
                 });
 
-            describe_stat("hcclReduceScatter(src!=dst, count=" + to_string(count) +
-                              ", dtype=fp32, iterations=" + to_string(demo_data.num_iters) + ")",
-                          stat,
-                          data_size,
-                          reduce_scatter_factor,
-                          hccl_rank,
-                          demo_data.num_iters,
-                          test_type,
-                          "float",
-                          is_root_rank);
-        }
-        else if (test_type == "all_gather")
-        {
-            double all_gather_factor = ((double) (demo_data.nranks - 1));
+                describe_stat("hcclReduceScatter(src!=dst, data_size=" + to_string(data_size) + ", count=" +
+                                  to_string(count) + ", dtype=fp32, iterations=" + to_string(demo_data.num_iters) + ")",
+                              stat,
+                              data_size,
+                              reduce_scatter_factor,
+                              hccl_rank,
+                              demo_data.num_iters,
+                              test_type,
+                              "float",
+                              "sum",
+                              is_root_rank);
+            }
+            else if (test_type == "all_gather")
+            {
+                double all_gather_factor = ((double) (demo_data.nranks - 1));
 
-            // Run HCCL AllGather collective
-            auto stat = benchmark(
-                demo_data,
-                [&](uint64_t iter) {
+                // Run HCCL AllGather collective
+                auto stat = benchmark(demo_data, [&](uint64_t iter) {
                     uint64_t index = iter % number_of_buffers;
                     CHECK_HCCL_STATUS(hcclAllGather((const void*) input_dev_ptrs[index],
                                                     (void*) output_dev_ptrs[index],
@@ -839,25 +978,24 @@ int main()
                                                     demo_data.collective_stream));
                 });
 
-            describe_stat("hcclAllGather(src!=dst, count=" + to_string(count) +
-                              ", dtype=fp32, iterations=" + to_string(demo_data.num_iters) + ")",
-                          stat,
-                          data_size,
-                          all_gather_factor,
-                          hccl_rank,
-                          demo_data.num_iters,
-                          test_type,
-                          "float",
-                          is_root_rank);
-        }
-        else if (test_type == "all2all")
-        {
-            double all2all_factor = ((double) (demo_data.nranks - 1)) / ((double) demo_data.nranks);
+                describe_stat("hcclAllGather(src!=dst, data_size=" + to_string(data_size) + ", count=" +
+                                  to_string(count) + ", dtype=fp32, iterations=" + to_string(demo_data.num_iters) + ")",
+                              stat,
+                              data_size,
+                              all_gather_factor,
+                              hccl_rank,
+                              demo_data.num_iters,
+                              test_type,
+                              "float",
+                              "",
+                              is_root_rank);
+            }
+            else if (test_type == "all2all")
+            {
+                double all2all_factor = ((double) (demo_data.nranks - 1)) / ((double) demo_data.nranks);
 
-            // Run HCCL AlltoAll collective
-            auto stat = benchmark(
-                demo_data,
-                [&](uint64_t iter) {
+                // Run HCCL AlltoAll collective
+                auto stat = benchmark(demo_data, [&](uint64_t iter) {
                     uint64_t index = iter % number_of_buffers;
                     CHECK_HCCL_STATUS(hcclAlltoAll((const void*) input_dev_ptrs[index],
                                                    (void*) output_dev_ptrs[index],
@@ -867,53 +1005,52 @@ int main()
                                                    demo_data.collective_stream));
                 });
 
-            describe_stat("hcclAlltoAll(src!=dst, count=" + to_string(count) +
-                              ", dtype=fp32, iterations=" + to_string(demo_data.num_iters) + ")",
-                          stat,
-                          data_size,
-                          all2all_factor,
-                          hccl_rank,
-                          demo_data.num_iters,
-                          test_type,
-                          "float",
-                          is_root_rank);
-        }
-        else if (test_type == "send_recv")
-        {
-            if (demo_data.ranks_list.length() > 0)
+                describe_stat("hcclAlltoAll(src!=dst, data_size=" + to_string(data_size) + ", count=" +
+                                  to_string(count) + ", dtype=fp32, iterations=" + to_string(demo_data.num_iters) + ")",
+                              stat,
+                              data_size,
+                              all2all_factor,
+                              hccl_rank,
+                              demo_data.num_iters,
+                              test_type,
+                              "float",
+                              "",
+                              is_root_rank);
+            }
+            else if (test_type == "send_recv")
             {
-                if (hccl_rank == get_demo_test_root())
+                if (demo_data.ranks_list.length() > 0)
                 {
-                    log() << "Will perform ranks send_recv test with list: " << get_ranks_list() << std::endl;
+                    if (hccl_rank == get_demo_test_root())
+                    {
+                        log() << "Will perform ranks send_recv test with list: " << get_ranks_list() << std::endl;
+                    }
+                    send_recv_ranks_test_driver(demo_data,
+                                                test_type,
+                                                hccl_rank,
+                                                data_size,
+                                                count,
+                                                input_dev_ptrs,
+                                                output_dev_ptrs);
                 }
-                send_recv_ranks_test_driver(demo_data,
-                                            test_type,
-                                            hccl_rank,
-                                            data_size,
-                                            count,
-                                            input_dev_ptrs,
-                                            output_dev_ptrs);
+                else
+                {
+                    send_recv_test_driver(demo_data,
+                                          test_type,
+                                          hccl_rank,
+                                          data_size,
+                                          count,
+                                          input_dev_ptrs,
+                                          output_dev_ptrs);
+                }
             }
-            else
+            else if (test_type == "reduce")
             {
-                send_recv_test_driver(demo_data,
-                                      test_type,
-                                      hccl_rank,
-                                      data_size,
-                                      count,
-                                      input_dev_ptrs,
-                                      output_dev_ptrs);
-            }
-        }
-        else if (test_type == "reduce")
-        {
-            double reduce_factor = 1;
-            int    root          = get_demo_test_root();
+                double reduce_factor = 1;
+                int    root          = get_demo_test_root();
 
-            // Run HCCL Reduce collective
-            auto stat = benchmark(
-                demo_data,
-                [&](uint64_t iter) {
+                // Run HCCL Reduce collective
+                auto stat = benchmark(demo_data, [&](uint64_t iter) {
                     uint64_t index = iter % number_of_buffers;
                     CHECK_HCCL_STATUS(hcclReduce((const void*) input_dev_ptrs[index],
                                                  (void*) output_dev_ptrs[index],
@@ -925,32 +1062,44 @@ int main()
                                                  demo_data.collective_stream));
                 });
 
-            describe_stat("Reduce(count=" + std::to_string(count) +
-                              ", dtype=fp32, iterations=" + std::to_string(demo_data.num_iters) + ")",
-                          stat,
-                          data_size,
-                          reduce_factor,
-                          hccl_rank,
-                          demo_data.num_iters,
-                          test_type,
-                          "float",
-                          is_root_rank);
-        }
-        else
-        {
-            log() << "Unknown test type (" << test_type << ")" << endl;
-            return -1;
+                describe_stat("Reduce(data_size=" + to_string(data_size) + ", count=" + std::to_string(count) +
+                                  ", dtype=fp32, iterations=" + std::to_string(demo_data.num_iters) + ")",
+                              stat,
+                              data_size,
+                              reduce_factor,
+                              hccl_rank,
+                              demo_data.num_iters,
+                              test_type,
+                              "float",
+                              "sum",
+                              is_root_rank);
+            }
+            else
+            {
+                log() << "Unknown test type (" << test_type << ")" << endl;
+                return -1;
+            }
+
+            CHECK_SYNAPSE_STATUS(synStreamSynchronize(demo_data.collective_stream));
+
+            CHECK_SYNAPSE_STATUS(synDeviceFree(demo_data.device_handle, input_dev_ptr, 0));
+            CHECK_SYNAPSE_STATUS(synDeviceFree(demo_data.device_handle, output_dev_ptr, 0));
+            input_dev_ptrs.clear();
+            output_dev_ptrs.clear();
         }
 
-        CHECK_SYNAPSE_STATUS(synStreamSynchronize(demo_data.collective_stream));
+        if (should_write_report(hccl_rank))
+        {
+            print_report(test_type, demo_data.num_iters);
+        }
 
         // Destroy HCCL communicator
         CHECK_HCCL_STATUS(hcclCommDestroy(demo_data.hccl_comm));
 
-        CHECK_SYNAPSE_STATUS(synDeviceFree(demo_data.device_handle, input_dev_ptr, 0));
-        CHECK_SYNAPSE_STATUS(synDeviceFree(demo_data.device_handle, output_dev_ptr, 0));
-        input_dev_ptrs.clear();
-        output_dev_ptrs.clear();
+        // destroy streams
+        CHECK_SYNAPSE_STATUS(synStreamDestroy(demo_data.collective_stream));
+        CHECK_SYNAPSE_STATUS(synStreamDestroy(demo_data.device_to_host_stream));
+        CHECK_SYNAPSE_STATUS(synStreamDestroy(demo_data.host_to_device_stream));
 
         // Clean up HCCL
         CHECK_SYNAPSE_STATUS(synDeviceRelease(demo_data.device_handle));
@@ -961,7 +1110,6 @@ int main()
 #if MPI_ENABLED
         CHECK_MPI_STATUS(MPI_Finalize());
 #endif  // MPI_ENABLED
-
     }
     catch (const exception& ex)
     {
