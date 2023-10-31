@@ -79,7 +79,7 @@ Please follow the instructions below:<br />
     ```
 9.  Configure libfabric:
     ```
-    ./configure --prefix=$LIBFABRIC_ROOT --enable-debug
+    ./configure --prefix=$LIBFABRIC_ROOT --with-synapseai=/usr
     ```
 10. Build and install libfabric:
     ```
