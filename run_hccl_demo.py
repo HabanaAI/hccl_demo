@@ -15,6 +15,8 @@ Args
     --ranks_list       - str, Comma separated list of pairs of ranks for send_recv ranks test only, e.g. 0,8,1,8 (optional, default is to perform regular send_recv test with all ranks)
     --test_root        - int, Index of root rank for broadcast and reduce tests
     --csv_path         - str, Path to a file for results output
+    --size_range       - pair of str, Test will run from MIN to MAX, units of G,M,K,B or no unit. Default is Bytes, e.g. --size_range 32B 1M
+    --size_range_inc   - int, Test will run on all multiplies by 2^size_range_inc from MIN to MAX (default: 1)
     -mpi               - Use MPI for managing execution
     -clean             - Clear old executable and compile a new one
     -list              - Display a list of available tests
@@ -55,6 +57,8 @@ class DemoTest:
         self.node_id                  = None
         self.test                     = None
         self.size                     = None
+        self.size_range               = None
+        self.size_range_inc           = None
         self.loop                     = None
         self.ranks_list               = None
         self.test_root                = None
@@ -116,6 +120,10 @@ class DemoTest:
                             help="Specify test (use '-l' option for test list)", default="broadcast")
         parser.add_argument("--size", metavar="N", type=str,
                             help="Data size in units of G,M,K,B or no unit. Default is Bytes.", default=33554432)
+        parser.add_argument("--size_range", type=str, nargs=2, metavar=("MIN","MAX"),
+                            help="Test will run from MIN to MAX, units of G,M,K,B or no unit. Default is Bytes, e.g. --size_range 32B 1M")
+        parser.add_argument("--size_range_inc", metavar="M", type=int,
+                            help="Test will run on all multiplies by 2^size_range_inc from MIN to MAX ", default=1)
         parser.add_argument("--loop", type=int,
                             help="Number of loop iterations", default=10)
         parser.add_argument("--test_root", type=int, default=0,
@@ -126,7 +134,7 @@ class DemoTest:
         parser.add_argument("-mpi", action="store_true",
                             help="Use MPI for managing execution")
         parser.add_argument("-clean", action="store_true",
-                            help="Clean previous artifacts including logs, recipe and csv results")
+                            help="Clean previous artifacts including logs and csv results")
         parser.add_argument("-list", "--list_tests", action="store_true",
                             help="Display a list of available tests")
         parser.add_argument("-help", action="store_true",
@@ -199,7 +207,12 @@ class DemoTest:
                 self.exit_demo()
             self.validate_arguments()
             self.get_env()
-            self.parse_size()
+            if self.size_range:
+                self.size_range[0] = self.parse_size(self.size_range[0])
+                self.size_range[1] = self.parse_size(self.size_range[1])
+            else:
+                self.size = self.parse_size(self.size)
+
             self.validate_size()
             self.prepare_command()
             if self.clean:
@@ -248,7 +261,14 @@ class DemoTest:
             cmd_args = []
             numa_output_path = os.getenv('NUMA_MAPPING_DIR', self.default_affinity_dir)
             cmd_args.append("HCCL_DEMO_TEST="          + str(self.test))
-            cmd_args.append("HCCL_DEMO_TEST_SIZE="     + str(self.size))
+            if self.size_range:
+                cmd_args.append("HCCL_SIZE_RANGE_MIN=" + str(self.size_range[0]))
+                cmd_args.append("HCCL_SIZE_RANGE_MAX=" + str(self.size_range[1]))
+                cmd_args.append("HCCL_SIZE_RANGE_INC=" + str(self.size_range_inc))
+            else:
+                cmd_args.append("HCCL_DEMO_TEST_SIZE=" + str(self.size))
+
+
             cmd_args.append("HCCL_DEMO_TEST_LOOP="     + str(self.loop))
             if self.ranks_list:
                 cmd_args.append("HCCL_RANKS_LIST="        + str(self.ranks_list))
@@ -345,19 +365,24 @@ class DemoTest:
     def run_mpi_test(self):
         '''# MPI helper method
            The following method is used in order to run HCCL demo test using MPI.'''
+        mpi_cmd = self.cmd_list[0]
+        mpi_cmd += " hccl_demo"
+        self.run_mpi_command(mpi_cmd)
+
+    def run_mpi_command(self, mpi_cmd):
+        '''# MPI helper method
+           The following method is used in order to run MPI command.'''
         try:
-            mpi_cmd = self.cmd_list[0]
-            mpi_cmd += " hccl_demo"
-            self.log_info(f"HCCL demo test mpi command line:", 'green')
+            self.log_info(f"HCCL mpi command line:", 'green')
             self.log_info(mpi_cmd)
             process = subprocess.Popen(mpi_cmd, shell=True)
             process.wait()
             process.communicate()
             return_code = process.poll()
             if return_code != 0:
-                self.exit_demo(f'[run_mpi_test] One of the hccl_test processes failed, terminating hccl demo')
+                self.exit_demo(f'[run_mpi_command] mpi command processes failed, terminating hccl demo. command: {mpi_cmd}')
         except Exception as e:
-            self.log_error(f'[run_mpi_test] {e}', exception=True)
+            self.log_error(f'[run_mpi_command] {e}, command: {mpi_cmd}', exception=True)
             raise Exception(e)
 
     def run_command(self, command):
@@ -467,13 +492,13 @@ class DemoTest:
             self.log_error(f'[apply_mpi_defaults] {e}', exception=True)
             raise Exception(e)
 
-    def parse_size(self):
+    def parse_size(self, input_size):
         '''The following method is used to parse the size to be sent.
            The format of the size would be <size><unit> , for example: 4G.
            One of the following sizes can be requested: G/M/K/B (not case sensitive).
            The unit is optional, if omitted the default unit <B> will be used.'''
         try:
-            size = str(self.size)
+            size = str(input_size)
             units_dict = {"G": 1024*1024*1024,
                           "M": 1024*1024,
                           "K": 1024,
@@ -489,10 +514,10 @@ class DemoTest:
                 else:
                     self.log_error("Provided unit is not supported. Please choose between G,M,K,B or no unit. Going to use Bytes as default.")
                     unit_size = 1
-                self.size = str(int(number*unit_size))
+                return str(int(number*unit_size))
             else:
                 self.log_debug(f'Unit was not specified by user. Using Bytes as default unit.')
-                self.size = size
+                return size
         except Exception as e:
             self.log_error(f'[parse_size] {e}' ,exception=True)
             raise Exception(e)
@@ -502,18 +527,16 @@ class DemoTest:
            broadcast | reduce | all_reduce | all_gather | send_recv - require at least a single element.
            all2all | reduce_scatter - require at least a single element for each rank (i.e element * number of ranks)
            since HCCL demo supports float data type only, the minimum size would be:
-           calculated number of elements * size of float'''
+           calculated number of elements * size of float
+           when using size range the min size should be smaller than max size'''
         try:
             float_size = struct.calcsize('f')
-            if self.test == 'reduce_scatter' or self.test == 'all2all':
-                min_supported_size = self.nranks * float_size
-                if (min_supported_size > int(self.size)):
-                    self.exit_demo(f'[validate_size] Requested size: {self.size}B was less than supported minimun size: {min_supported_size}B')
-            else:
-                min_supported_size = float_size
-                if (min_supported_size > int(self.size)):
-                    self.exit_demo(f'[validate_size] Requested size: {self.size}B was less than supported minimun size: {min_supported_size}B')
-
+            min_supported_size = self.nranks * float_size if (self.test == 'reduce_scatter' or self.test == 'all2all') else float_size
+            min_size = self.size_range[0] if self.size_range else self.size
+            if (min_supported_size > int(min_size)):
+                self.exit_demo(f'[validate_size] Requested size: {min_size}B was less than supported minimun size: {min_supported_size}B')
+            if self.size_range and int(self.size_range[0]) > int(self.size_range[1]):
+                self.exit_demo(f'[validate_size] Requested size_range min size: {self.size_range[0]}B should be less than size_range max size: {self.size_range[1]}B')
         except Exception as e:
             self.log_error(f'[validate_size] {e}' ,exception=True)
             raise Exception(e)
@@ -619,11 +642,42 @@ class DemoTest:
         else:
             print(msg)
 
+    def is_remote_directory(self, directory_path):
+        '''The following method is used in order to check if a directory is remote'''
+        try:
+            # Get the device number of the specified directory
+            target_device = os.stat(directory_path).st_dev
+
+            # Get information about mounted filesystems
+            mount_info = os.statvfs(directory_path)
+
+            # Compare the device number of the directory with device numbers of mounted filesystems
+            for mount_point in os.listdir('/'):
+                mount_point_path = os.path.join('/', mount_point)
+                if os.path.ismount(mount_point_path):
+                    mount_device = os.statvfs(mount_point_path).f_fsid
+                    if mount_device != mount_info.f_fsid:
+                        return True
+            return False
+        except OSError as e:
+            self.log_error(f'[should_rm_dir_using_mpi] {e}' ,exception=True)
+            return None
+
     def clear_logs(self):
         '''The following method is used in order to clean old HCCL demo log files'''
         try:
-            rm_cmd = 'rm -rf ~/.habana_logs*'   # This will not work when running demo w/o MPI, as it will run from each server ad collides with logs there created by another server
-            self.run_process(rm_cmd)
+            habana_logs_dir = os.environ.get('HABANA_LOGS')
+            if(habana_logs_dir is not None and habana_logs_dir != "" and os.path.exists(habana_logs_dir)):
+                rm_cmd = 'rm -rf $HABANA_LOGS'
+                is_remote_dir = self.is_remote_directory(habana_logs_dir)
+                if self.mpi and is_remote_dir is False:
+                    mpi_prefix = self.get_mpi_command()
+                    mpi_rm_cmd = mpi_prefix + ' -N 1 ' + rm_cmd
+                    self.run_mpi_command(mpi_rm_cmd)
+                else:
+                    self.run_process(rm_cmd)
+            else:
+                self.log_error(f'[clear_logs] HABANA_LOGS variable is not set')
         except Exception as e:
             self.log_error(f'[clear_logs] {e}' ,exception=True)
 
@@ -655,13 +709,12 @@ class DemoTest:
     def clean_artifacts(self):
         '''The following method is used in order to clean artifacts such as:
         1) Old HCCL demo log files
-        2) Old .recipe files
-        3) Old .csv files'''
+        2) Old .csv files'''
         try:
             self.make_demo(is_clean=True)
             self.clear_logs()
             all_files = os.listdir(".")
-            files_to_delete = [f for f in all_files if f.endswith('.recipe.used') or f.endswith('.csv')]
+            files_to_delete = [f for f in all_files if f.endswith('.csv')]
             for f in files_to_delete:
                 os.remove(f)
                 self.log_debug(f'Cleaning: {f}')

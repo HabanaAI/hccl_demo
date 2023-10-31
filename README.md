@@ -152,6 +152,8 @@ This mode is supported with EFA provider if the following conditions are met:
     --ranks_list       - str, Comma separated list of pairs of ranks for send_recv ranks test only, e.g. 0,8,1,8 (optional, default is to perform regular send_recv test with all ranks)
     --test_root        - int, Index of root rank for broadcast and reduce tests
     --csv_path         - str, Path to a file for results output
+    --size_range       - pair of str, Test will run from MIN to MAX, units of G,M,K,B or no unit. Default is Bytes, e.g. --size_range 32B 1M
+    --size_range_inc   - int, Test will run on all multiplies by 2^size_range_inc from MIN to MAX (default: 1)
     -mpi               - Use MPI for managing execution
     -clean             - Clear old executable and compile a new one
     -list              - Display a list of available tests
@@ -221,6 +223,37 @@ First server output:
     [BENCHMARK]     NW Bandwidth     : <Test results> MB/s
     [BENCHMARK]     Algo Bandwidth   : <Test results> MB/s
     ###############################################################################
+
+### Running HCCL with size range on 1 server (8 Gaudi devices)
+
+Configuration: One server with 8 ranks, size range 32B to 1 MB, all_reduce collective, 1 iteration
+
+    HCCL_COMM_ID=127.0.0.1:5555 python3 run_hccl_demo.py --nranks 8 --node_id 0 --size_range 32b 1m --test all_reduce --loop 1 --ranks_per_node 8
+
+Output example:
+
+    ################################################
+    [SUMMARY REPORT]
+    (src!=dst, collective=all_reduce, iterations=1)
+
+    size          count         type          redop         time          algo_bw       nw_bw
+    (B)           (elements)                                (us)          (GB/s)        (GB/s)
+    32            8             float         sum           <time>        <bandwidth>   <bandwidth>
+    64            16            float         sum           <time>        <bandwidth>   <bandwidth>
+    128           32            float         sum           <time>        <bandwidth>   <bandwidth>
+    256           64            float         sum           <time>        <bandwidth>   <bandwidth>
+    512           128           float         sum           <time>        <bandwidth>   <bandwidth>
+    1024          256           float         sum           <time>        <bandwidth>   <bandwidth>
+    2048          512           float         sum           <time>        <bandwidth>   <bandwidth>
+    4096          1024          float         sum           <time>        <bandwidth>   <bandwidth>
+    8192          2048          float         sum           <time>        <bandwidth>   <bandwidth>
+    16384         4096          float         sum           <time>        <bandwidth>   <bandwidth>
+    32768         8192          float         sum           <time>        <bandwidth>   <bandwidth>
+    65536         16384         float         sum           <time>        <bandwidth>   <bandwidth>
+    131072        32768         float         sum           <time>        <bandwidth>   <bandwidth>
+    262144        65536         float         sum           <time>        <bandwidth>   <bandwidth>
+    524288        131072        float         sum           <time>        <bandwidth>   <bandwidth>
+    1048576       262144        float         sum           <time>        <bandwidth>   <bandwidth>
 
 ## Examples - MPI mode
 
