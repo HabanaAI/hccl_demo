@@ -745,7 +745,7 @@ static void send_recv_ranks_test_driver(hccl_demo_data&             demo_data,
         send_recv_ranks_factor = (float) (recvFromRanks.size());
         log() << "hccl_rank=" << hccl_rank << ", numberOfSenders=" << numberOfSenders
               << ", reportingReceiverRank=" << reportingReceiverRank << ", reportingSenderRank=" << reportingSenderRank
-              << std::endl;
+              << ", recvFromRanks.size()=" << recvFromRanks.size() << std::endl;
     }
 
     if (output_dev_ptrs.size() < recvFromRanks.size())
@@ -754,9 +754,10 @@ static void send_recv_ranks_test_driver(hccl_demo_data&             demo_data,
     }
 
     auto stat = benchmark(demo_data, [&](uint64_t iter) {
+        const uint64_t index = iter % input_dev_ptrs.size();
         CHECK_HCCL_STATUS(send_recv_ranks_test(iter,
                                                output_dev_ptrs,
-                                               (const void*) input_dev_ptrs[iter],
+                                               (const void*) input_dev_ptrs[index],
                                                count,
                                                demo_data.hccl_comm,
                                                demo_data.collective_stream,
