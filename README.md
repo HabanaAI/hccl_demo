@@ -148,6 +148,7 @@ This mode is supported with EFA provider if the following conditions are met:
     --node_id          - int, ID of the running host. Each host should have unique id between 0-num_nodes
     --test             - str, Which hccl test to run (for example: broadcast/all_reduce) (default: broadcast)
     --size             - str, Data size in units of G,M,K,B or no unit (default: 33554432 Bytes)
+    --data_type        - str, Type of data, float or bfloat16 (default: float)
     --loop             - int, Number of iterations (must be positive, default: 10)
     --ranks_list       - str, Comma separated list of pairs of ranks for send_recv ranks test only, e.g. 0,8,1,8 (optional, default is to perform regular send_recv test with all ranks)
     --test_root        - int, Index of root rank for broadcast and reduce tests
@@ -192,7 +193,7 @@ Configuration: One server with 8 ranks, 32 MB size, all_reduce collective, 1000 
 Output example:
 
     ###############################################################################
-    [BENCHMARK] hcclAllReduce(src!=dst, count=8388608, dtype=fp32, iterations=1000)
+    [BENCHMARK] hcclAllReduce(src!=dst, count=8388608, dtype=float, iterations=1000)
     [BENCHMARK]     NW Bandwidth   : <Test results> MB/s
     [BENCHMARK]     Algo Bandwidth : <Test results> MB/s
     ###############################################################################
@@ -219,7 +220,7 @@ Second server command:
 First server output:
 
     ###############################################################################
-    [BENCHMARK] hcclAllReduce(src!=dst, count=8388608, dtype=fp32, iterations=1000)
+    [BENCHMARK] hcclAllReduce(src!=dst, count=8388608, dtype=float, iterations=1000)
     [BENCHMARK]     NW Bandwidth     : <Test results> MB/s
     [BENCHMARK]     Algo Bandwidth   : <Test results> MB/s
     ###############################################################################
@@ -271,7 +272,7 @@ Configuration: One server with 8 ranks, 32 MB size, all_reduce collective, 1000 
 Output example:
 
     ###############################################################################
-    [BENCHMARK] hcclAllReduce(src!=dst, count=8388608, dtype=fp32, iterations=1000)
+    [BENCHMARK] hcclAllReduce(src!=dst, count=8388608, dtype=float, iterations=1000)
     [BENCHMARK]     NW Bandwidth     : <Test results> MB/s
     [BENCHMARK]     Algo Bandwidth   : <Test results> MB/s
     ###############################################################################
@@ -295,7 +296,7 @@ Second option using MPI host:
 First server output:
 
     ###############################################################################
-    [BENCHMARK] hcclAllReduce(src!=dst, count=8388608, dtype=fp32, iterations=1000)
+    [BENCHMARK] hcclAllReduce(src!=dst, count=8388608, dtype=float, iterations=1000)
     [BENCHMARK]     NW Bandwidth     : <Test results> MB/s
     [BENCHMARK]     Algo Bandwidth   : <Test results> MB/s
     ###############################################################################
