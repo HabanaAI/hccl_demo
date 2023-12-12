@@ -15,6 +15,7 @@ Args
     --ranks_list       - str, Comma separated list of pairs of ranks for send_recv ranks test only, e.g. 0,8,1,8 (optional, default is to perform regular send_recv test with all ranks)
     --test_root        - int, Index of root rank for broadcast and reduce tests
     --csv_path         - str, Path to a file for results output
+    --data_type        - str, Data type, float or bfloat16. Default is float
     --size_range       - pair of str, Test will run from MIN to MAX, units of G,M,K,B or no unit. Default is Bytes, e.g. --size_range 32B 1M
     --size_range_inc   - int, Test will run on all multiplies by 2^size_range_inc from MIN to MAX (default: 1)
     -mpi               - Use MPI for managing execution
@@ -70,6 +71,7 @@ class DemoTest:
         self.number_of_processes      = None
         self.ignore_mpi_errors        = None
         self.no_color                 = None
+        self.data_type                = None
         self.default_affinity_dir     = '/tmp/affinity_topology_output'
         self.cmd_list                 = []
         self.default_mpi_interface    = 'eth0'
@@ -87,6 +89,8 @@ class DemoTest:
                                          'send_recv',
                                          'reduce',
                                          'all2all']
+        self.data_type_list           = ['float',
+                                         'bfloat16']
         self.optional_env_list        = ['DISABLE_PROC_AFFINITY',
                                          'ENFORCE_PROC_AFFINITY',
                                          'BEST_EFFORT_AFFINITY',
@@ -107,6 +111,8 @@ class DemoTest:
         self.default_mpi_arg_list     = ['--allow-run-as-root',
                                          '--mca btl_tcp_if_include']
         self.ignore_mpi_errors_list   = ['--mca btl_openib_warn_no_device_params_found 0']
+
+        self.data_type_to_struct_format = {'float' : 'f', 'bfloat16' : 'e'}
 
         parser = argparse.ArgumentParser(description="""Run HCCL demo test""", allow_abbrev=False)
 
@@ -131,6 +137,8 @@ class DemoTest:
         parser.add_argument("--ranks_list", type=str, help="list of pairs of ranks for send_recv ranks scaleout, e.g. 0,8,1,8 (optional)")
         parser.add_argument("--csv_path", type=str,
                             help="Path to a file for results output (optional)")
+        parser.add_argument("--data_type", type=str, default="float",
+                            help="Data type, float or bfloat16. Default is float")
         parser.add_argument("-mpi", action="store_true",
                             help="Use MPI for managing execution")
         parser.add_argument("-clean", action="store_true",
@@ -189,6 +197,9 @@ class DemoTest:
             if not self.test in self.test_list:
                 self.display_test_list()
                 self.exit_demo(f'[validate_arguments] Chosen test: {self.test} is not part of the tests list')
+            if not self.data_type in self.data_type_list:
+                self.display_data_type_list()
+                self.exit_demo(f'[validate_arguments] Chosen data type: {self.data_type} is not a valid data type')
             if self.loop < 1:
                 self.exit_demo(f'[validate_arguments] Argument loop was set to: {self.loop}, it must be positive')
         except Exception as e:
@@ -261,6 +272,7 @@ class DemoTest:
             cmd_args = []
             numa_output_path = os.getenv('NUMA_MAPPING_DIR', self.default_affinity_dir)
             cmd_args.append("HCCL_DEMO_TEST="          + str(self.test))
+            cmd_args.append("HCCL_DATA_TYPE="          + str(self.data_type))
             if self.size_range:
                 cmd_args.append("HCCL_SIZE_RANGE_MIN=" + str(self.size_range[0]))
                 cmd_args.append("HCCL_SIZE_RANGE_MAX=" + str(self.size_range[1]))
@@ -522,6 +534,14 @@ class DemoTest:
             self.log_error(f'[parse_size] {e}' ,exception=True)
             raise Exception(e)
 
+    def get_data_type_size(self):
+        '''The following method calculates the size of the data type used in bytes'''
+        try:
+            return struct.calcsize(self.data_type_to_struct_format[self.data_type])
+        except Exception as e:
+            self.log_error(f'[get_data_type_size] {e}', exception=True)
+            raise Exception(e)
+
     def validate_size(self):
         '''The following method is used to validate the size requested by the user.
            broadcast | reduce | all_reduce | all_gather | send_recv - require at least a single element.
@@ -530,8 +550,8 @@ class DemoTest:
            calculated number of elements * size of float
            when using size range the min size should be smaller than max size'''
         try:
-            float_size = struct.calcsize('f')
-            min_supported_size = self.nranks * float_size if (self.test == 'reduce_scatter' or self.test == 'all2all') else float_size
+            data_type_size = self.get_data_type_size()
+            min_supported_size = self.nranks * data_type_size if (self.test == 'reduce_scatter' or self.test == 'all2all') else data_type_size
             min_size = self.size_range[0] if self.size_range else self.size
             if (min_supported_size > int(min_size)):
                 self.exit_demo(f'[validate_size] Requested size: {min_size}B was less than supported minimun size: {min_supported_size}B')
@@ -550,6 +570,17 @@ class DemoTest:
                 self.log_info(f'{test}', 'yellow')
         except Exception as e:
             self.log_error(f'[display_test_list] {e}' ,exception=True)
+            raise Exception(e)
+
+    def display_data_type_list(self):
+        '''The following method is used to display list of data types
+           for the user upon request or error in chosen data type name.'''
+        try:
+            self.log_info("\nData type list:", 'yellow')
+            for data_type in self.data_type_list:
+                self.log_info(f'{data_type}', 'yellow')
+        except Exception as e:
+            self.log_error(f'[display_data_type_list] {e}' ,exception=True)
             raise Exception(e)
 
     def get_ranks_per_node(self):
