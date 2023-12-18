@@ -90,7 +90,6 @@ struct hccl_demo_data
 
 struct hccl_demo_stats
 {
-    float  avg_duration_in_sec;
     float  rank_duration_in_sec;
     size_t num_iters;
 };
@@ -127,50 +126,6 @@ uint64_t get_data_type_size(const string& data_type)
     return data_size;
 }
 
-hcclResult_t get_avg_duration(hccl_demo_data& demo_data, hccl_demo_stats& stat)
-{
-    float&      rank_duration       = stat.rank_duration_in_sec;
-    float&      avg_duration        = stat.avg_duration_in_sec;
-    uint64_t    data_size           = sizeof(stat.rank_duration_in_sec);
-    uint64_t    count               = data_size / get_data_type_size(demo_data.str_data_type);
-    const void* input_host_data_ptr = reinterpret_cast<void*>(&rank_duration);
-
-    uint64_t input_dev_ptr {};
-    uint64_t output_dev_ptr {};
-
-    CHECK_SYNAPSE_STATUS(synDeviceMalloc(demo_data.device_handle, data_size, 0, 0, &input_dev_ptr));
-    CHECK_SYNAPSE_STATUS(synDeviceMalloc(demo_data.device_handle, data_size, 0, 0, &output_dev_ptr));
-    CHECK_SYNAPSE_STATUS(synHostMap(demo_data.device_handle, data_size, input_host_data_ptr));
-    CHECK_SYNAPSE_STATUS(synMemCopyAsync(demo_data.host_to_device_stream,
-                                         (uint64_t) input_host_data_ptr,
-                                         data_size,
-                                         input_dev_ptr,
-                                         HOST_TO_DRAM));
-    CHECK_SYNAPSE_STATUS(synStreamSynchronize(demo_data.host_to_device_stream));
-    CHECK_HCCL_STATUS(hcclAllReduce((const void*) input_dev_ptr,
-                                    (void*) output_dev_ptr,
-                                    count,
-                                    demo_data.hccl_data_type,
-                                    hcclSum,
-                                    demo_data.hccl_comm,
-                                    demo_data.collective_stream));
-    CHECK_SYNAPSE_STATUS(synStreamSynchronize(demo_data.collective_stream));
-
-    const void* output_host_data_ptr = reinterpret_cast<void*>(&avg_duration);
-
-    CHECK_SYNAPSE_STATUS(synHostMap(demo_data.device_handle, data_size, output_host_data_ptr));
-    CHECK_SYNAPSE_STATUS(synMemCopyAsync(demo_data.device_to_host_stream,
-                                         output_dev_ptr,
-                                         data_size,
-                                         (uint64_t) output_host_data_ptr,
-                                         DRAM_TO_HOST));
-    CHECK_SYNAPSE_STATUS(synStreamSynchronize(demo_data.device_to_host_stream));
-
-    avg_duration = avg_duration / demo_data.nranks;
-
-    return hcclSuccess;
-}
-
 hccl_demo_stats benchmark(hccl_demo_data& demo_data, const function<void(uint64_t)>& fn)
 {
     hccl_demo_stats stat;
@@ -191,8 +146,6 @@ hccl_demo_stats benchmark(hccl_demo_data& demo_data, const function<void(uint64_
     auto duration             = Clock::now() - start_time;
     stat.rank_duration_in_sec = chrono::duration_cast<chrono::duration<double>>(duration).count();
     stat.rank_duration_in_sec = stat.rank_duration_in_sec / demo_data.num_iters;
-
-    CHECK_HCCL_STATUS(get_avg_duration(demo_data, stat));
 
     return stat;
 }
@@ -515,10 +468,8 @@ void describe_stat(const string&          stat_name,
                    const string&          reduction_op,
                    const bool             reportingRank)
 {
-    auto algo_bandwidth = (double) data_size / stats.avg_duration_in_sec;
-    auto avg_bandwidth  = algo_bandwidth * factor;
-    auto rank_bandwith  = (double) data_size / stats.rank_duration_in_sec;
-    rank_bandwith       = rank_bandwith * factor;
+    auto algo_bandwidth = (double) data_size / stats.rank_duration_in_sec;
+    auto nw_bandwidth   = algo_bandwidth * factor;
     bool write_report   = should_write_report(hccl_rank);
 
     if (write_report)
@@ -532,7 +483,7 @@ void describe_stat(const string&          stat_name,
         size_t delimiter_size = stat_name.length() + string {"[BENCHMARK]"}.length() + 1;
         ss << get_print_delimiter(delimiter_size, '#') << '\n';
         ss << "[BENCHMARK] " << stat_name << '\n';
-        ss << "[BENCHMARK]     NW Bandwidth   : " << format_bw(avg_bandwidth) << '\n';
+        ss << "[BENCHMARK]     NW Bandwidth   : " << format_bw(nw_bandwidth) << '\n';
         ss << "[BENCHMARK]     Algo Bandwidth : " << format_bw(algo_bandwidth);
         ss << '\n' << get_print_delimiter(delimiter_size, '#') << '\n';
         log() << ss.str();
@@ -545,7 +496,7 @@ void describe_stat(const string&          stat_name,
         ofstream output;
         output.open(csv_path, ofstream::out | ofstream::app);
         output << test_type << "," << hccl_rank << "," << data_type << "," << data_size << "," << loop << ","
-               << format_bw(rank_bandwith) << endl;
+               << format_bw(nw_bandwidth) << endl;
         output.close();
     }
 
@@ -554,9 +505,9 @@ void describe_stat(const string&          stat_name,
     {
         hccl_demo_report_entry report_entry = {data_size,
                                                (uint64_t) (data_size / get_data_type_size(data_type)),
-                                               stats.avg_duration_in_sec,
+                                               stats.rank_duration_in_sec,
                                                algo_bandwidth,
-                                               avg_bandwidth,
+                                               nw_bandwidth,
                                                data_type,
                                                reduction_op};
         report_entry_vec.push_back(report_entry);
@@ -805,7 +756,7 @@ static void send_recv_ranks_test_driver(hccl_demo_data&             demo_data,
 
     if (output_dev_ptrs.size() < recvFromRanks.size())
     {
-        throw runtime_error("Insufficient memory for test. Required " + std::to_string(recvFromRanks.size()) + " chunks of size " + std::to_string(data_size) + 
+        throw runtime_error("Insufficient memory for test. Required " + std::to_string(recvFromRanks.size()) + " chunks of size " + std::to_string(data_size) +
             " bytes but only " + std::to_string(output_dev_ptrs.size()) + " are available.");
     }
 
