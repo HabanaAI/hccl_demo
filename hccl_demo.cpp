@@ -130,8 +130,10 @@ hccl_demo_stats benchmark(hccl_demo_data& demo_data, const function<void(uint64_
 {
     hccl_demo_stats stat;
 
-    // Warmup to sync all the gaudis on the device.
-    hcclBarrier(demo_data.hccl_comm, demo_data.collective_stream);
+    // Run a single iteration for warmup to sync all the gaudis on the device.
+    fn(0);
+
+    CHECK_SYNAPSE_STATUS(synStreamSynchronize(demo_data.collective_stream));
 
     // Actual iterations
     auto start_time = Clock::now();
