@@ -6,7 +6,7 @@ This README provides HCCL demo setup and usage as well as example run commands. 
 addition, it provides further setup steps required when using Host NIC Scale out.<br />
 Host NIC Scale out is achieved using OFI. [Host NIC Scale-Out Setup](#Host-NIC-Scale-Out-Setup)<br />
 section details the steps required to download, install and build OFI. It also provides<br />
-the required environment variables to run Host NIC scale-out with EFA Peer Direct.<br />
+the required environment variables to run Host NIC scale-out with Gaudi Direct.<br />
 
 ## Supported Collective Operations
 The following lists the supported collective operations:
@@ -47,7 +47,7 @@ libfabric should be downloaded and installed in order to use it.<br />
 Please follow the instructions below:<br />
 1.  Define required version to be installed:
     ```
-    export REQUIRED_VERSION=1.16.1
+    export REQUIRED_VERSION=1.20.0
     ```
 2.  Download libfabric tarball from https://github.com/ofiwg/libfabric/releases:
     ```
@@ -110,7 +110,7 @@ Please follow the instructions below:<br />
    ```
 2. Define LIBFABRIC_ROOT:
    ```
-   export LIBFABRIC_ROOT=/tmp/libfabric-1.16.0
+   export LIBFABRIC_ROOT=/tmp/libfabric-1.20.0
    ```
 3. Change directory to hccl_ofi_wrapper:
    ```
@@ -133,14 +133,16 @@ Please follow the instructions below:<br />
    export LD_LIBRARY_PATH=$LD_LIBRARY_PATH:/usr/lib/habanalabs/
    ```
 
-### EFA Peer-Direct
-Peer direct enables direct fabric access to Gaudi memory.
-This mode is supported with EFA provider if the following conditions are met:
-1. OFI version 1.16.0 (or higher)
+### Gaudi Direct
+Gaudi direct (GDR) enables direct fabric access to Gaudi memory.
+This mode is supported with Verbs or EFA provider if the following conditions are met:
+1. OFI version 1.16.0 (or higher) for EFA and 1.20.0 (or higher) for Verbs
 2. Kernel version 5.12 (or higher)
 3. The following environment variables are set:
-   FI_EFA_USE_DEVICE_RDMA=1
+   FI_EFA_USE_DEVICE_RDMA=1 (For AWS EFA)
    RDMAV_FORK_SAFE=1
+   MLX5_SCATTER_TO_CQE=0 (For MLX Verbs)
+4. PCIe ACS (Access Control) should be disabled
 
 ## Python Wrapper Arguments
     --nranks           - int, Number of ranks participating in the demo
