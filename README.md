@@ -180,7 +180,7 @@ Run the execution command
 
 ## Results
 Results are printed to the display<br />
-Results can also be printed to output file by using --csv_path <path_to_file>
+Results per rank can also be printed to output file by using --csv_path <path_to_file>
 
 ## Examples - without MPI
 
@@ -302,3 +302,30 @@ First server output:
     [BENCHMARK]     NW Bandwidth     : <Test results> MB/s
     [BENCHMARK]     Algo Bandwidth   : <Test results> MB/s
     ###############################################################################
+
+### Running HCCL demo with custom communicator:
+
+Running on 1 server:
+
+    Configuration: One server with 8 ranks, 32 MB size, all_reduce collective, 1000 iterations, communicator includes only ranks 0 and 1:
+
+        HCCL_COMM_ID=127.0.0.1:5555 python3 run_hccl_demo.py --nranks 8 --node_id 0 --size 32m --test all_reduce --loop 1 --ranks_per_node 8 --custom_comm 0,1
+
+Running on 2 servers with MPI (16 Gaudi devices):
+
+    * Note: When defining custom communicator, for each rank in the communicator we should have at least one more rank included that is a peer to the first one.
+    * In the following examaples we used MPI hostfile, using MPI host is good as well.
+
+    Configuration: 16 ranks, 32 MB size, all_reduce collective, 1000 iterations, communicator includes only ranks 0 and 8:
+
+        python3 run_hccl_demo.py --test all_reduce --loop 1000 --size 32m --custom_comm 0,8 -mpi --hostfile hostfile.txt
+
+Running on 2 servers without MPI (16 Gaudi devices):
+
+    Configuration: 16 ranks, 32 MB size, all_reduce collective, 1000 iterations, communicator includes only ranks 0,1,8,9:
+
+        First node:
+        HCCL_COMM_ID=10.111.12.234:5555 python3 run_hccl_demo.py --test all_reduce --nranks 16 --loop 1000 --node_id 0 --custom_comm 0,1,8,9
+
+        Second node:
+        HCCL_COMM_ID=10.111.12.234:5555 python3 run_hccl_demo.py --test all_reduce --nranks 16 --loop 1000 --node_id 1 --custom_comm 0,1,8,9

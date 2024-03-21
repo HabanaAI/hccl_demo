@@ -35,7 +35,7 @@
 #define DEFAULT_TEST_SIZE_RANGE_INC 1
 #define DEFAULT_TEST_LOOP 10
 #define DEFAULT_BOX_SIZE  8
-#define USABLE_MEMORY_PERCENTAGE (0.5)
+#define ALLOCATED_HBM_SIZE          (1024 * 1024 * 1024)  // 1G
 #define AMOUNT_JUMBO_BUFFERS (2)
 
 constexpr int INVALID_RANK    = -1;
@@ -86,6 +86,9 @@ struct hccl_demo_data
     std::string     str_data_type;
     size_t          num_iters;
     std::string     ranks_list;
+    int             hccl_rank;
+    int             mpi_root_rank;
+    uint64_t        usable_memory;
 };
 
 struct hccl_demo_stats
@@ -303,6 +306,12 @@ bool is_master_rank(const int hccl_rank)
     return false;
 }
 
+bool is_master_rank_unique_id(hccl_demo_data demo_data, const int hccl_rank)
+{
+    if (hccl_rank == demo_data.mpi_root_rank) return true;
+    return false;
+}
+
 bool should_write_report(const int hccl_rank)
 {
     static bool is_cached   = false;
@@ -340,6 +349,60 @@ string get_demo_csv_path()
         is_cached       = true;
     }
     return csv_path;
+}
+
+string get_demo_custom_comm()
+{
+    static string custom_comm = string {""};
+    char*         env_value   = getenv("HCCL_DEMO_CUSTOM_COMM");
+    custom_comm               = (env_value != nullptr) ? string(env_value) : custom_comm;
+    return custom_comm;
+}
+
+inline void ParseCustomCommEnv(string rank_list, vector<int>& parsed_rank_list)
+{
+    string delimiter = ",";
+    size_t pos       = 0;
+
+    while ((pos = rank_list.find(delimiter)) != string::npos)
+    {
+        parsed_rank_list.push_back(stoi(rank_list.substr(0, pos)));
+        rank_list.erase(0, pos + delimiter.length());
+    }
+
+    if (!rank_list.empty())
+    {
+        parsed_rank_list.push_back(stoi(rank_list));
+    }
+    sort(parsed_rank_list.begin(), parsed_rank_list.end());
+    return;
+}
+
+bool buildCustomComm(hccl_demo_data* demo_data)
+{
+    string rank_list = get_demo_custom_comm();
+    if (rank_list.size() == 0)
+    {
+        // Generate HCCL comm world
+        return true;
+    }
+
+    vector<int> peers;
+    ParseCustomCommEnv(rank_list, peers);
+
+    if (find(peers.begin(), peers.end(), demo_data->hccl_rank) != peers.end())
+    {
+        vector<int>::iterator it = find(peers.begin(), peers.end(), demo_data->hccl_rank);
+
+        // Override params to match new custom comm
+        demo_data->hccl_rank     = distance(peers.begin(), it);
+        demo_data->nranks        = peers.size();
+        demo_data->mpi_root_rank = *peers.begin();
+
+        return true;
+    }
+
+    return false;
 }
 
 int get_nranks()
@@ -407,7 +470,7 @@ uint64_t get_usable_memory(const synModuleId device_module_id)
     uint64_t total_memory = 0;  // Value is required by synDeviceGetMemoryInfo but not used
     CHECK_SYNAPSE_STATUS(
         synDeviceGetMemoryInfo(device_module_id, &free_memory, &total_memory));
-    return free_memory * USABLE_MEMORY_PERCENTAGE;
+    return free_memory;
 }
 
 void print_report(const string& collective_op, const size_t num_iters)
@@ -586,12 +649,14 @@ static void send_recv_test_driver(hccl_demo_data&             demo_data,
     //
     // In both cases, each rank does 1 send and 1 recv from another (same) rank.
 
-    const double send_recv_factor = 1;
-
-    const unsigned int boxSize    = static_cast<unsigned>(get_demo_box_size());
-    const unsigned int numOfRanks = demo_data.nranks;
-    const unsigned int numOfBoxes = numOfRanks / boxSize;
-
+    const double       send_recv_factor = 1;
+    const unsigned int boxSize          = static_cast<unsigned>(get_demo_box_size());
+    const unsigned int numOfRanks       = demo_data.nranks;
+    unsigned int       numOfBoxes       = numOfRanks / boxSize;
+    if (numOfRanks % boxSize > 0)
+    {
+        numOfBoxes++;
+    }
     const unsigned int ranksPerBox = numOfRanks / numOfBoxes;
 
     const unsigned myRank   = static_cast<unsigned>(hccl_rank);
@@ -700,7 +765,7 @@ static void send_recv_ranks_test_driver(hccl_demo_data&             demo_data,
                                         const uint64_t              data_size,
                                         const uint64_t              count,
                                         const std::vector<uint64_t> input_dev_ptrs,
-                                        const std::vector<uint64_t> output_dev_ptrs)
+                                        std::vector<uint64_t>       output_dev_ptrs)
 {
     //
     // This test performs send_recv from/to specific ranks given as a list
@@ -756,10 +821,27 @@ static void send_recv_ranks_test_driver(hccl_demo_data&             demo_data,
               << ", recvFromRanks.size()=" << recvFromRanks.size() << std::endl;
     }
 
+    if (((recvFromRanks.size() + input_dev_ptrs.size()) * data_size) > demo_data.usable_memory)
+    {
+        throw runtime_error("Insufficient memory for test. Required " +
+                            std::to_string(recvFromRanks.size() + input_dev_ptrs.size()) + " chunks of size " +
+                            std::to_string(data_size) + " bytes but only " +
+                            std::to_string(demo_data.usable_memory / data_size) + " are available.");
+    }
+
+    uint64_t additional_output_dev_ptr = 0;
+
     if (output_dev_ptrs.size() < recvFromRanks.size())
     {
-        throw runtime_error("Insufficient memory for test. Required " + std::to_string(recvFromRanks.size()) + " chunks of size " + std::to_string(data_size) +
-            " bytes but only " + std::to_string(output_dev_ptrs.size()) + " are available.");
+        // Allocate additional receive buffers
+        uint64_t additional_buffers = recvFromRanks.size() - output_dev_ptrs.size();
+        CHECK_SYNAPSE_STATUS(
+            synDeviceMalloc(demo_data.device_handle, data_size * additional_buffers, 0, 0, &additional_output_dev_ptr));
+
+        for (uint64_t index = 0; index < additional_buffers; index++)
+        {
+            output_dev_ptrs.push_back(additional_output_dev_ptr + (index * data_size));
+        }
     }
 
     auto stat = benchmark(demo_data, [&](uint64_t iter) {
@@ -774,6 +856,11 @@ static void send_recv_ranks_test_driver(hccl_demo_data&             demo_data,
                                                sendToRanks,
                                                demo_data.hccl_data_type));
     });
+
+    if (additional_output_dev_ptr)
+    {
+        CHECK_SYNAPSE_STATUS(synDeviceFree(demo_data.device_handle, additional_output_dev_ptr, 0));
+    }
 
     describe_stat("hcclSendRecv(src!=dst, data_size=" + to_string(data_size) + ", count=" + to_string(count) +
                       ", dtype=" + demo_data.str_data_type + ", iterations=" + to_string(demo_data.num_iters) + ")",
@@ -813,14 +900,23 @@ int main()
         demo_data.ranks_list     = get_ranks_list();
         demo_data.hccl_data_type = get_demo_hccl_data_type();
         demo_data.str_data_type  = get_demo_str_data_type();
+        demo_data.hccl_rank      = get_hccl_rank();
+        demo_data.mpi_root_rank  = 0;
 
-        const int hccl_rank = get_hccl_rank();
+        if (buildCustomComm(&demo_data) == false)
+        {
+            log() << "HCCL demo process id (" << demo_data.hccl_rank
+                  << ") will not participate in the custom communicator" << endl;
+#if MPI_ENABLED
+            CHECK_MPI_STATUS(MPI_Finalize());
+#endif
+            return 0;
+        }
 
         // Initialize Synapse API context
         CHECK_SYNAPSE_STATUS(synInitialize());
-
         // Acquire device
-        const synModuleId device_module_id = hccl_rank % get_demo_box_size();
+        const synModuleId device_module_id = get_hccl_rank() % get_demo_box_size();
         CHECK_SYNAPSE_STATUS(synDeviceAcquireByModuleId(&demo_data.device_handle, device_module_id));
 
 #if AFFINITY_ENABLED
@@ -836,17 +932,17 @@ int main()
 
         // Generate unique id
         hcclUniqueId unique_id {};
-        if (is_master_rank(hccl_rank))
+        if (is_master_rank_unique_id(demo_data, get_hccl_rank()))
         {
             CHECK_HCCL_STATUS(hcclGetUniqueId(&unique_id));
         }
 
 #if MPI_ENABLED
-        CHECK_MPI_STATUS(MPI_Bcast(&unique_id, sizeof(unique_id), MPI_BYTE, master_mpi_rank, MPI_COMM_WORLD));
+        CHECK_MPI_STATUS(MPI_Bcast(&unique_id, sizeof(unique_id), MPI_BYTE, demo_data.mpi_root_rank, MPI_COMM_WORLD));
 #endif  // MPI_ENABLED
 
         // Create new HCCL communicator
-        CHECK_HCCL_STATUS(hcclCommInitRank(&demo_data.hccl_comm, demo_data.nranks, unique_id, hccl_rank));
+        CHECK_HCCL_STATUS(hcclCommInitRank(&demo_data.hccl_comm, demo_data.nranks, unique_id, demo_data.hccl_rank));
 
         uint64_t              input_dev_ptr {};
         uint64_t              output_dev_ptr {};
@@ -860,10 +956,8 @@ int main()
 
         // Allocate buffers on the HPU device
         string test_type = get_demo_test_type();
-
         // clear report vector
         report_entry_vec.clear();
-
         for (double size = size_min; size <= size_max; size = size * pow(2, data_size_inc))
         {
             const uint64_t data_size = (uint64_t) size;
@@ -872,12 +966,12 @@ int main()
             const uint64_t output_size     = (test_type == "all_gather") ? data_size * demo_data.nranks : data_size;
             const uint64_t max_buffer_size = std::max(data_size, output_size);
 
-            const uint64_t usable_memory = get_usable_memory(device_module_id);
-            uint64_t number_of_buffers = 1;
-            if (max_buffer_size < usable_memory)
+            demo_data.usable_memory    = get_usable_memory(device_module_id);
+            uint64_t number_of_buffers = 2;
+            if (max_buffer_size <= ALLOCATED_HBM_SIZE)
             {
-                number_of_buffers = (usable_memory / max_buffer_size) <= 2 ? AMOUNT_JUMBO_BUFFERS
-                                                                           : usable_memory / max_buffer_size;
+                number_of_buffers = (ALLOCATED_HBM_SIZE / max_buffer_size) <= 2 ? AMOUNT_JUMBO_BUFFERS
+                                                                                : ALLOCATED_HBM_SIZE / max_buffer_size;
             }
 
             CHECK_SYNAPSE_STATUS(
@@ -890,8 +984,7 @@ int main()
                 input_dev_ptrs.push_back(input_dev_ptr + (index * data_size));
                 output_dev_ptrs.push_back(output_dev_ptr + (index * output_size));
             }
-
-            const bool is_root_rank = should_report_stat(hccl_rank);
+            const bool is_root_rank = should_report_stat(demo_data.hccl_rank);
             if (test_type == "broadcast")
             {
                 double broadcast_factor = 1;
@@ -915,7 +1008,7 @@ int main()
                               stat,
                               data_size,
                               broadcast_factor,
-                              hccl_rank,
+                              demo_data.hccl_rank,
                               demo_data.num_iters,
                               test_type,
                               demo_data.str_data_type,
@@ -944,7 +1037,7 @@ int main()
                               stat,
                               data_size,
                               allreduce_factor,
-                              hccl_rank,
+                              demo_data.hccl_rank,
                               demo_data.num_iters,
                               test_type,
                               demo_data.str_data_type,
@@ -973,7 +1066,7 @@ int main()
                               stat,
                               data_size,
                               reduce_scatter_factor,
-                              hccl_rank,
+                              demo_data.hccl_rank,
                               demo_data.num_iters,
                               test_type,
                               demo_data.str_data_type,
@@ -1001,7 +1094,7 @@ int main()
                               stat,
                               data_size,
                               all_gather_factor,
-                              hccl_rank,
+                              demo_data.hccl_rank,
                               demo_data.num_iters,
                               test_type,
                               demo_data.str_data_type,
@@ -1029,7 +1122,7 @@ int main()
                               stat,
                               data_size,
                               all2all_factor,
-                              hccl_rank,
+                              demo_data.hccl_rank,
                               demo_data.num_iters,
                               test_type,
                               demo_data.str_data_type,
@@ -1040,13 +1133,13 @@ int main()
             {
                 if (demo_data.ranks_list.length() > 0)
                 {
-                    if (hccl_rank == get_demo_test_root())
+                    if (demo_data.hccl_rank == get_demo_test_root())
                     {
                         log() << "Will perform ranks send_recv test with list: " << get_ranks_list() << std::endl;
                     }
                     send_recv_ranks_test_driver(demo_data,
                                                 test_type,
-                                                hccl_rank,
+                                                demo_data.hccl_rank,
                                                 data_size,
                                                 count,
                                                 input_dev_ptrs,
@@ -1056,7 +1149,7 @@ int main()
                 {
                     send_recv_test_driver(demo_data,
                                           test_type,
-                                          hccl_rank,
+                                          demo_data.hccl_rank,
                                           data_size,
                                           count,
                                           input_dev_ptrs,
@@ -1087,7 +1180,7 @@ int main()
                               stat,
                               data_size,
                               reduce_factor,
-                              hccl_rank,
+                              demo_data.hccl_rank,
                               demo_data.num_iters,
                               test_type,
                               demo_data.str_data_type,
@@ -1108,7 +1201,7 @@ int main()
             output_dev_ptrs.clear();
         }
 
-        if (should_write_report(hccl_rank))
+        if (should_write_report(demo_data.hccl_rank))
         {
             print_report(test_type, demo_data.num_iters);
         }

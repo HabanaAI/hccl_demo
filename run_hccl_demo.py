@@ -111,6 +111,7 @@ class DemoTest:
         self.default_mpi_arg_list     = ['--allow-run-as-root',
                                          '--mca btl_tcp_if_include']
         self.ignore_mpi_errors_list   = ['--mca btl_openib_warn_no_device_params_found 0']
+        self.custom_comm = ""
 
         self.data_type_to_struct_format = {'float' : 'f', 'bfloat16' : 'e'}
 
@@ -151,6 +152,8 @@ class DemoTest:
                             help="Ignore generic MPI errors.")
         parser.add_argument("-no_color", action="store_true",
                             help="Disable colored output in terminal.")
+        parser.add_argument("--custom_comm", type=str, default="",
+                            help="list of HCCL process that will open a communicator")
 
         self.create_logger()
 
@@ -289,7 +292,8 @@ class DemoTest:
             cmd_args.append("HCCL_DEMO_MPI_REQUESTED=" + str(int(self.mpi)))
             cmd_args.append("MPI_ENABLED="             + str(int(self.mpi)))
             cmd_args.append("NUMA_MAPPING_DIR="        + str(numa_output_path))
-
+            if self.custom_comm:
+                cmd_args.append("HCCL_DEMO_CUSTOM_COMM=" +str(self.custom_comm))
             cmd_args.extend(self.set_optional_env())
             if not self.mpi:
                 rank = id + self.node_id * self.number_of_processes
