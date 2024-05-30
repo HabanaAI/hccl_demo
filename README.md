@@ -157,6 +157,8 @@ This mode is supported with Verbs or EFA provider if the following conditions ar
     --csv_path         - str, Path to a file for results output
     --size_range       - pair of str, Test will run from MIN to MAX, units of G,M,K,B or no unit. Default is Bytes, e.g. --size_range 32B 1M
     --size_range_inc   - int, Test will run on all multiplies by 2^size_range_inc from MIN to MAX (default: 1)
+    -data_csv          - Creates 2 csv file for each rank, one for data input and second for data output
+    --no_correctness   - disables the correctness check
     -mpi               - Use MPI for managing execution
     -clean             - Clear old executable and compile a new one
     -list              - Display a list of available tests

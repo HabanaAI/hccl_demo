@@ -8,6 +8,7 @@
 #include <unistd.h>
 #include <sstream>
 #include <fstream>
+#include <synapse_api.h>
 
 using namespace std;
 
@@ -239,7 +240,12 @@ int setupAffinity(int device_module_id)
 {
     if (!get_disable_proc_affinity_env())
     {
-        if (get_num_sockets() && get_num_cores_per_socket() && get_num_ht())
+        if((uint32_t)device_module_id == INVALID_MODULE_ID)
+        {
+                cout << "Failed to set affinty, unknown module ID" << endl;
+                return get_enforce_proc_affinity_env();
+        }
+        else if (get_num_sockets() && get_num_cores_per_socket() && get_num_ht())
         {
             cout << "Setting custom affinity" << endl;
             if (setCustomAffinity(device_module_id, get_num_sockets(), get_num_cores_per_socket(), get_num_ht()) != 0)

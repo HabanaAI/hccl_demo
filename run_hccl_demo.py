@@ -18,6 +18,7 @@ Args
     --data_type        - str, Data type, float or bfloat16. Default is float
     --size_range       - pair of str, Test will run from MIN to MAX, units of G,M,K,B or no unit. Default is Bytes, e.g. --size_range 32B 1M
     --size_range_inc   - int, Test will run on all multiplies by 2^size_range_inc from MIN to MAX (default: 1)
+    -data_csv          - Creates 2 csv file for each rank, one for data input and second for data output
     -mpi               - Use MPI for managing execution
     -clean             - Clear old executable and compile a new one
     -list              - Display a list of available tests
@@ -72,9 +73,9 @@ class DemoTest:
         self.ignore_mpi_errors        = None
         self.no_color                 = None
         self.data_type                = None
+        self.no_correctness           = False
         self.default_affinity_dir     = '/tmp/affinity_topology_output'
         self.cmd_list                 = []
-        self.default_mpi_interface    = 'eth0'
         self.log_level                = Logger.DEBUG
         self.mpi_args                 = []
         self.ERROR                    = 1
@@ -112,6 +113,7 @@ class DemoTest:
                                          '--mca btl_tcp_if_include']
         self.ignore_mpi_errors_list   = ['--mca btl_openib_warn_no_device_params_found 0']
         self.custom_comm = ""
+        self.data_csv = False
 
         self.data_type_to_struct_format = {'float' : 'f', 'bfloat16' : 'e'}
 
@@ -154,6 +156,9 @@ class DemoTest:
                             help="Disable colored output in terminal.")
         parser.add_argument("--custom_comm", type=str, default="",
                             help="list of HCCL process that will open a communicator")
+        parser.add_argument("-data_csv", action="store_true",
+                            help="Creates 2 csv file for each rank, one for data input and second for data output.")
+        parser.add_argument("--no_correctness", action="store_true", help="Skip correctness validation")
 
         self.create_logger()
 
@@ -283,6 +288,10 @@ class DemoTest:
             else:
                 cmd_args.append("HCCL_DEMO_TEST_SIZE=" + str(self.size))
 
+            cmd_args.append("HCCL_DEMO_DATA_CSV="      + str(self.data_csv))
+
+            if (self.no_correctness == True):
+                cmd_args.append("HCCL_DEMO_CHECK_CORRECTNESS=0")
 
             cmd_args.append("HCCL_DEMO_TEST_LOOP="     + str(self.loop))
             if self.ranks_list:
@@ -482,8 +491,8 @@ class DemoTest:
 
     def apply_mpi_defaults(self, mpi_cmd):
         '''# MPI helper method
-           The following method is used in order add default
-           arguments and environment variables to MPI command line,
+           The following method is used to add default arguments
+           and environment variables to MPI command line,
            in case were not specified by user.'''
         try:
             self.log_debug(f'Setting HCCL demo MPI default environment variables:')
@@ -498,8 +507,9 @@ class DemoTest:
             for default_arg in self.default_mpi_arg_list:
                 if default_arg not in mpi_cmd:
                     if default_arg == '--mca btl_tcp_if_include':
-                        mpi_cmd += default_arg.rjust(len(default_arg) + 1) + " " + self.default_mpi_interface
-                        self.log_debug(f'{default_arg} {self.default_mpi_interface}')
+                        interface = self.find_interface()
+                        mpi_cmd += default_arg.rjust(len(default_arg) + 1) + " " + interface
+                        self.log_debug(f'{default_arg} {interface}')
                     else:
                         mpi_cmd += default_arg.rjust(len(default_arg) + 1)
                         self.log_debug(f'{default_arg}')
@@ -773,6 +783,21 @@ class DemoTest:
             sys.exit(exit_code)
         except Exception as e:
             self.log_error(f'[exit_demo] {e}', exception=True)
+
+    def find_interface(self):
+        try:
+            res = self.run_command("route")
+            interface = ""
+            for line in res:
+                if "default" in line:
+                    interface = line.split(" ")[-1]
+                    break
+            if interface == "":
+                self.exit_demo(f'[find_interface] MPI requires --mca btl_tcp_if_include <interface>')
+            return interface
+        except Exception as e:
+            self.log_error(f'[find_interface] {e}', exception=True)
+
 
 if __name__ == '__main__':
     try:
