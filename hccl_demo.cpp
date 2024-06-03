@@ -4,6 +4,7 @@
  ******************************************************************************/
 
 // C++ Standard Libraries
+#include <algorithm>
 #include <cstdint>
 #include <iostream>
 #include <exception>
@@ -37,8 +38,9 @@
 #define DEFAULT_TEST_SIZE_RANGE_INC 1
 #define DEFAULT_TEST_LOOP           10
 #define DEFAULT_BOX_SIZE            8
-#define ALLOCATED_HBM_SIZE          (1024 * 1024 * 1024)  // 1G
+#define ALLOCATED_HBM_SIZE          (2UL * 1024 * 1024 * 1024)  // 2G
 #define AMOUNT_JUMBO_BUFFERS        (2)
+#define MAX_BUFFER_COUNT            (33UL)
 
 constexpr int      INVALID_RANK      = -1;
 constexpr int      master_mpi_rank   = 0;
@@ -1085,6 +1087,7 @@ int run_test(hccl_demo_data demo_data, bool bf16_convert, const synModuleId devi
             number_of_buffers = (ALLOCATED_HBM_SIZE / max_buffer_size) <= 2 ? AMOUNT_JUMBO_BUFFERS
                                                                             : ALLOCATED_HBM_SIZE / max_buffer_size;
         }
+        number_of_buffers = std::min(number_of_buffers, MAX_BUFFER_COUNT);
 
         CHECK_SYNAPSE_STATUS(
             synDeviceMalloc(demo_data.device_handle, data_size * number_of_buffers, 0, 0, &input_dev_ptr));
