@@ -1939,7 +1939,7 @@ int run_test(hccl_demo_data demo_data, bool bf16_convert, const synModuleId devi
 #endif  // MPI_ENABLED
     if (!is_ok)
     {
-        throw runtime_error {"Collective operation has failed on corretness."};
+        throw runtime_error {"Collective operation has failed on correctness."};
     }
     return 0;
 }

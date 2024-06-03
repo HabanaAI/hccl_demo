@@ -6,25 +6,25 @@ Usage example -
 HCCL_COMM_ID=127.0.0.1:9696 python3 run_hccl_demo.py --test broadcast --nranks 8 --node_id 0 --ranks_per_node 8
 
 Args
-    --nranks           - int, Number of ranks participating in the demo
-    --ranks_per_node   - int, Number of ranks participating in the demo for current node
-    --node_id          - int, ID of the running host. Each host should have unique id between 0-num_nodes
-    --test             - str, Which hccl test to run (for example: broadcast/all_reduce) (default: broadcast)
-    --size             - str, Data size in units of G,M,K,B or no unit (default: 33554432)
-    --loop             - int, Number of iterations (must be positive, default: 10)
-    --ranks_list       - str, Comma separated list of pairs of ranks for send_recv ranks test only, e.g. 0,8,1,8 (optional, default is to perform regular send_recv test with all ranks)
-    --test_root        - int, Index of root rank for broadcast and reduce tests
-    --csv_path         - str, Path to a file for results output
-    --data_type        - str, Data type, float or bfloat16. Default is float
-    --size_range       - pair of str, Test will run from MIN to MAX, units of G,M,K,B or no unit. Default is Bytes, e.g. --size_range 32B 1M
-    --size_range_inc   - int, Test will run on all multiplies by 2^size_range_inc from MIN to MAX (default: 1)
-    -data_csv          - Creates 2 csv file for each rank, one for data input and second for data output
-    -mpi               - Use MPI for managing execution
-    -clean             - Clear old executable and compile a new one
-    -list              - Display a list of available tests
-    -help              - Display detailed help for HCCL demo in a form of docstring
-    -ignore_mpi_errors - Ignore generic MPI errors
-    -no_color          - Disable the usage of colors in console output
+    --nranks            - int, Number of ranks participating in the demo
+    --ranks_per_node    - int, Number of ranks participating in the demo for current node
+    --node_id           - int, ID of the running host. Each host should have unique id between 0-num_nodes
+    --test              - str, Which hccl test to run (for example: broadcast/all_reduce) (default: broadcast)
+    --size              - str, Data size in units of G,M,K,B or no unit (default: 33554432)
+    --loop              - int, Number of iterations (must be positive, default: 10)
+    --ranks_list        - str, Comma separated list of pairs of ranks for send_recv ranks test only, e.g. 0,8,1,8 (optional, default is to perform regular send_recv test with all ranks)
+    --test_root         - int, Index of root rank for broadcast and reduce tests
+    --csv_path          - str, Path to a file for results output
+    --data_type         - str, Data type, float or bfloat16. Default is float
+    --size_range        - pair of str, Test will run from MIN to MAX, units of G,M,K,B or no unit. Default is Bytes, e.g. --size_range 32B 1M
+    --size_range_inc    - int, Test will run on all multiplies by 2^size_range_inc from MIN to MAX (default: 1)
+    --data_csv          - Creates 2 csv file for each rank, one for data input and second for data output
+    --mpi               - Use MPI for managing execution
+    --clean             - Clear old executable and compile a new one
+    --list              - Display a list of available tests
+    --doc               - Display detailed help for HCCL demo in a form of docstring
+    --ignore_mpi_errors - Ignore generic MPI errors
+    --no_color          - Disable the usage of colors in console output
 
 Env variables - General
     HCCL_COMM_ID     - IP of node_id=0 host and an available port, in the format <IP:PORT>
@@ -68,7 +68,7 @@ class DemoTest:
         self.clean                    = None
         self.list_tests               = None
         self.dev_env                  = False
-        self.help                     = None
+        self.doc                      = None
         self.number_of_processes      = None
         self.ignore_mpi_errors        = None
         self.no_color                 = None
@@ -142,21 +142,21 @@ class DemoTest:
                             help="Path to a file for results output (optional)")
         parser.add_argument("--data_type", type=str, default="float",
                             help="Data type, float or bfloat16. Default is float")
-        parser.add_argument("-mpi", action="store_true",
+        parser.add_argument("--mpi", "-mpi", action="store_true",
                             help="Use MPI for managing execution")
-        parser.add_argument("-clean", action="store_true",
-                            help="Clean previous artifacts including logs and csv results")
+        parser.add_argument("--clean", "-clean", action="store_true",
+                            help="Clean previous artifacts including logs, recipe and csv results")
         parser.add_argument("-list", "--list_tests", action="store_true",
                             help="Display a list of available tests")
-        parser.add_argument("-help", action="store_true",
+        parser.add_argument("--doc", action="store_true",
                             help="Display detailed help for HCCL demo in a form of docstring")
-        parser.add_argument("-ignore_mpi_errors", action="store_true",
+        parser.add_argument("--ignore_mpi_errors", "-ignore_mpi_errors", action="store_true",
                             help="Ignore generic MPI errors.")
-        parser.add_argument("-no_color", action="store_true",
+        parser.add_argument("--no_color", "-no_color", action="store_true",
                             help="Disable colored output in terminal.")
         parser.add_argument("--custom_comm", type=str, default="",
                             help="list of HCCL process that will open a communicator")
-        parser.add_argument("-data_csv", action="store_true",
+        parser.add_argument("--data_csv", "-data_csv", action="store_true",
                             help="Creates 2 csv file for each rank, one for data input and second for data output.")
         parser.add_argument("--no_correctness", action="store_true", help="Skip correctness validation")
 
@@ -218,7 +218,7 @@ class DemoTest:
         '''The following method is used to prepare the required information
            before starting HCCL demo test.'''
         try:
-            if self.help:
+            if self.doc:
                 help(DemoTest)
                 self.exit_demo()
             if self.list_tests:
@@ -796,7 +796,7 @@ class DemoTest:
                 self.exit_demo(f'[find_interface] MPI requires --mca btl_tcp_if_include <interface>')
             return interface
         except Exception as e:
-            self.log_error(f'[find_interface] {e}', exception=True)
+            self.exit_demo(f'[find_interface] MPI requires --mca btl_tcp_if_include <interface>')
 
 
 if __name__ == '__main__':
