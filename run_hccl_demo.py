@@ -52,6 +52,15 @@ import os, sys, subprocess, signal
 from multiprocessing import Pool
 import struct
 
+TEST_LIST = ['broadcast',
+             'all_reduce',
+             'reduce_scatter',
+             'all_gather',
+             'send_recv',
+             'reduce',
+             'all2all']
+
+
 class DemoTest:
     def __init__(self):
         self.nranks                   = None
@@ -83,13 +92,6 @@ class DemoTest:
         self.csv_path                 = ""
         self.log_prefix               = "HCCL_demo_log_"
         self.demo_exe                 = "./hccl_demo"
-        self.test_list                = ['broadcast',
-                                         'all_reduce',
-                                         'reduce_scatter',
-                                         'all_gather',
-                                         'send_recv',
-                                         'reduce',
-                                         'all2all']
         self.data_type_list           = ['float',
                                          'bfloat16']
         self.optional_env_list        = ['DISABLE_PROC_AFFINITY',
@@ -125,7 +127,7 @@ class DemoTest:
                             help="Number of ranks in the node")
         parser.add_argument("--node_id", type=int,
                             help="Box index. Value in the range of (0, NUM_BOXES)", default=-1)
-        parser.add_argument("--test", type=str,
+        parser.add_argument("--test", type=str, choices=TEST_LIST,
                             help="Specify test (use '-l' option for test list)", default="broadcast")
         parser.add_argument("--size", metavar="N", type=str,
                             help="Data size in units of G,M,K,B or no unit. Default is Bytes.", default=33554432)
@@ -202,9 +204,6 @@ class DemoTest:
                     invalid_arguments.append("ranks_per_node")
                 if invalid_arguments:
                     self.exit_demo(f'[validate_arguments] the following command line arguments cannot be used in MPI mode: {invalid_arguments}')
-            if not self.test in self.test_list:
-                self.display_test_list()
-                self.exit_demo(f'[validate_arguments] Chosen test: {self.test} is not part of the tests list')
             if not self.data_type in self.data_type_list:
                 self.display_data_type_list()
                 self.exit_demo(f'[validate_arguments] Chosen data type: {self.data_type} is not a valid data type')
@@ -580,7 +579,7 @@ class DemoTest:
            for the user upon request or error in chosen test name.'''
         try:
             self.log_info("\nTests list:", 'yellow')
-            for test in self.test_list:
+            for test in TEST_LIST:
                 self.log_info(f'{test}', 'yellow')
         except Exception as e:
             self.log_error(f'[display_test_list] {e}' ,exception=True)
