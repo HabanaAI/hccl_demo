@@ -121,12 +121,12 @@ class DemoTest:
 
         parser = argparse.ArgumentParser(description="""Run HCCL demo test""", allow_abbrev=False)
 
-        parser.add_argument("--nranks", type=int, default=-1,
+        parser.add_argument("--nranks", type=int, required=True,
                             help="Number of ranks in the communicator")
         parser.add_argument("--ranks_per_node", type=int,
                             help="Number of ranks in the node")
-        parser.add_argument("--node_id", type=int,
-                            help="Box index. Value in the range of (0, NUM_BOXES)", default=-1)
+        parser.add_argument("--node_id", type=int, required=True,
+                            help="Box index. Value in the range of (0, NUM_BOXES)")
         parser.add_argument("--test", type=str, choices=TEST_LIST,
                             help="Specify test (use '-l' option for test list)", default="broadcast")
         parser.add_argument("--size", metavar="N", type=str,
