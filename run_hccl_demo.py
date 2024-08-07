@@ -5,35 +5,12 @@ HCCL demo runner.
 Usage example -
 HCCL_COMM_ID=127.0.0.1:9696 python3 run_hccl_demo.py --test broadcast --nranks 8 --node_id 0 --ranks_per_node 8
 
-Args
-    --nranks            - int, Number of ranks participating in the demo
-    --ranks_per_node    - int, Number of ranks participating in the demo for current node
-    --node_id           - int, ID of the running host. Each host should have unique id between 0-num_nodes
-    --test              - str, Which hccl test to run (for example: broadcast/all_reduce) (default: broadcast)
-    --size              - str, Data size in units of G,M,K,B or no unit (default: 33554432)
-    --loop              - int, Number of iterations (must be positive, default: 10)
-    --ranks_list        - str, Comma separated list of pairs of ranks for send_recv ranks test only, e.g. 0,8,1,8 (optional, default is to perform regular send_recv test with all ranks)
-    --test_root         - int, Index of root rank for broadcast and reduce tests
-    --csv_path          - str, Path to a file for results output
-    --data_type         - str, Data type, float or bfloat16. Default is float
-    --size_range        - pair of str, Test will run from MIN to MAX, units of G,M,K,B or no unit. Default is Bytes, e.g. --size_range 32B 1M
-    --size_range_inc    - int, Test will run on all multiplies by 2^size_range_inc from MIN to MAX (default: 1)
-    --data_csv          - Creates 2 csv file for each rank, one for data input and second for data output
-    --mpi               - Use MPI for managing execution
-    --clean             - Clear old executable and compile a new one
-    --list              - Display a list of available tests
-    --doc               - Display detailed help for HCCL demo in a form of docstring
-    --ignore_mpi_errors - Ignore generic MPI errors
-    --no_color          - Disable the usage of colors in console output
-
 Env variables - General
     HCCL_COMM_ID     - IP of node_id=0 host and an available port, in the format <IP:PORT>
 
 Env variables - Host scaleout
-    SOCKET_NTHREADS       - Number of threads to manage TCP sockets (default 2)
-    NSOCK_PERTHREAD       - Number of sockets per thread (default 3)
-    HCCL_OVER_TCP         - 1 to use TCP between boxes, 0 to use scaleout nics
     HCCL_OVER_OFI         - 1 to use OFI between boxes, 0 to use scaleout nics
+    HCCL_GAUDI_DIRECT     - 1 to enable Gaudi Direct
 
 Env variables - Host affinity settings
     NUM_SOCKETS           - Number of sockets for process affinity (default 0)
@@ -56,6 +33,7 @@ class DemoTest:
     def __init__(self):
         self.nranks                   = None
         self.ranks_per_node           = None
+        self.scaleup_group_size       = None
         self.node_id                  = None
         self.test                     = None
         self.size                     = None
@@ -74,6 +52,8 @@ class DemoTest:
         self.no_color                 = None
         self.data_type                = None
         self.no_correctness           = False
+        self.reduction_op             = None
+        self.scaleout_bw              = None
         self.default_affinity_dir     = '/tmp/affinity_topology_output'
         self.cmd_list                 = []
         self.log_level                = Logger.DEBUG
@@ -89,20 +69,18 @@ class DemoTest:
                                          'all_gather',
                                          'send_recv',
                                          'reduce',
-                                         'all2all']
+                                         'all2all',
+                                         'scale_validation']
         self.data_type_list           = ['float',
                                          'bfloat16']
         self.optional_env_list        = ['DISABLE_PROC_AFFINITY',
                                          'ENFORCE_PROC_AFFINITY',
                                          'BEST_EFFORT_AFFINITY',
-                                         'HCCL_OVER_TCP',
                                          'HCCL_OVER_OFI',
                                          'NUM_HT',
                                          'NUM_SOCKETS',
                                          'NUM_CORES_PER_SOCKET',
-                                         'NUMA_MAPPING_DIR',
-                                         'NSOCK_PERTHREAD',
-                                         'SOCKET_NTHREADS']
+                                         'NUMA_MAPPING_DIR']
         self.default_mpi_env_list     = ['LD_LIBRARY_PATH']
         self.default_mpi_env_list_dev = ['HCL_ROOT',
                                          'SYNAPSE_ROOT',
@@ -118,47 +96,59 @@ class DemoTest:
         self.data_type_to_struct_format = {'float' : 'f', 'bfloat16' : 'e'}
 
         parser = argparse.ArgumentParser(description="""Run HCCL demo test""", allow_abbrev=False)
+        # General flags
+        general_group = parser.add_argument_group('General Options')
+        general_group.add_argument("--clean", "-clean", action="store_true",
+                            help="Clean previous artifacts including logs, recipe and csv results.")
+        general_group.add_argument("-list", "--list_tests", action="store_true",
+                            help="Display a list of available tests.")
+        general_group.add_argument("--doc", action="store_true",
+                            help="Display detailed help for HCCL demo in a form of docstring.")
 
-        parser.add_argument("--nranks", type=int, default=-1,
-                            help="Number of ranks in the communicator")
-        parser.add_argument("--ranks_per_node", type=int,
-                            help="Number of ranks in the node")
-        parser.add_argument("--node_id", type=int,
-                            help="Box index. Value in the range of (0, NUM_BOXES)", default=-1)
-        parser.add_argument("--test", type=str,
-                            help="Specify test (use '-l' option for test list)", default="broadcast")
-        parser.add_argument("--size", metavar="N", type=str,
+        # Setup configuration flags
+        setup_group = parser.add_argument_group('Setup Configuration Options')
+        setup_group.add_argument("--nranks", type=int, default=-1,
+                            help="Number of ranks in the communicator.")
+        setup_group.add_argument("--ranks_per_node", type=int,
+                            help="Number of cards per node (box), default read from h/w or set by MPI.")
+        setup_group.add_argument("--scaleup_group_size", type=int,
+                            help="Scaleup group size per node, default is ranks_per_node")
+        setup_group.add_argument("--node_id", type=int,
+                            help="Box index. Value in the range of (0, NUM_BOXES).", default=-1)
+        setup_group.add_argument("--mpi", "-mpi", action="store_true",
+                            help="Use MPI for managing execution.")
+        # Test control flags
+        test_group = parser.add_argument_group('Test Control Options')
+        test_group.add_argument("--test", type=str,
+                            help="Specify test (use '-l' option for test list).", default="broadcast")
+        test_group.add_argument("--size", metavar="N", type=str,
                             help="Data size in units of G,M,K,B or no unit. Default is Bytes.", default=33554432)
-        parser.add_argument("--size_range", type=str, nargs=2, metavar=("MIN","MAX"),
-                            help="Test will run from MIN to MAX, units of G,M,K,B or no unit. Default is Bytes, e.g. --size_range 32B 1M")
-        parser.add_argument("--size_range_inc", metavar="M", type=int,
-                            help="Test will run on all multiplies by 2^size_range_inc from MIN to MAX ", default=1)
-        parser.add_argument("--loop", type=int,
-                            help="Number of loop iterations", default=10)
-        parser.add_argument("--test_root", type=int, default=0,
-                            help="Index of root rank for broadcast and reduce tests (optional)")
-        parser.add_argument("--ranks_list", type=str, help="list of pairs of ranks for send_recv ranks scaleout, e.g. 0,8,1,8 (optional)")
-        parser.add_argument("--csv_path", type=str,
-                            help="Path to a file for results output (optional)")
-        parser.add_argument("--data_type", type=str, default="float",
-                            help="Data type, float or bfloat16. Default is float")
-        parser.add_argument("--mpi", "-mpi", action="store_true",
-                            help="Use MPI for managing execution")
-        parser.add_argument("--clean", "-clean", action="store_true",
-                            help="Clean previous artifacts including logs, recipe and csv results")
-        parser.add_argument("-list", "--list_tests", action="store_true",
-                            help="Display a list of available tests")
-        parser.add_argument("--doc", action="store_true",
-                            help="Display detailed help for HCCL demo in a form of docstring")
-        parser.add_argument("--ignore_mpi_errors", "-ignore_mpi_errors", action="store_true",
+        test_group.add_argument("--size_range", type=str, nargs=2, metavar=("MIN","MAX"),
+                            help="Test will run from MIN to MAX, units of G,M,K,B or no unit. Default is Bytes. E.g. --size_range 32B 1M.")
+        test_group.add_argument("--size_range_inc", metavar="M", type=int,
+                            help="Test will run on all multiplies by 2^size_range_inc from MIN to MAX.", default=1)
+        test_group.add_argument("--loop", type=int,
+                            help="Number of loop iterations.", default=10)
+        test_group.add_argument("--test_root", type=int, default=0,
+                            help="Index of root rank for broadcast and reduce tests (optional).")
+        test_group.add_argument("--ranks_list", type=str, help="List of pairs of ranks for send_recv ranks scaleout. E.g. 0,8,1,8 (optional).")
+        test_group.add_argument("--data_type", type=str, default="float",
+                            help="Data type, float or bfloat16. Default is float.")
+        test_group.add_argument("--custom_comm", type=str, default="",
+                            help="List of HCCL process that will open a communicator.")
+        test_group.add_argument("--no_correctness", action="store_true", help="Skip correctness validation.")
+        test_group.add_argument("--reduction_op", type=str, help="<sum|min|max> (default=sum)", default="sum")
+        test_group.add_argument("--scaleout_bw", type=str, help="Expected scaleout BW in units of G,M,K,B or no unit. Default is Bytes/sec")
+        # Logging flags
+        log_group = parser.add_argument_group('Logging Options')
+        log_group.add_argument("--csv_path", type=str,
+                            help="Path to a file for results output (optional).")
+        log_group.add_argument("--ignore_mpi_errors", "-ignore_mpi_errors", action="store_true",
                             help="Ignore generic MPI errors.")
-        parser.add_argument("--no_color", "-no_color", action="store_true",
+        log_group.add_argument("--no_color", "-no_color", action="store_true",
                             help="Disable colored output in terminal.")
-        parser.add_argument("--custom_comm", type=str, default="",
-                            help="list of HCCL process that will open a communicator")
-        parser.add_argument("--data_csv", "-data_csv", action="store_true",
+        log_group.add_argument("--data_csv", "-data_csv", action="store_true",
                             help="Creates 2 csv file for each rank, one for data input and second for data output.")
-        parser.add_argument("--no_correctness", action="store_true", help="Skip correctness validation")
 
         self.create_logger()
 
@@ -183,7 +173,9 @@ class DemoTest:
         try:
             if not self.mpi:
                 if not self.ranks_per_node:
-                    self.get_ranks_per_node()
+                    self.get_ranks_per_node()   # Read from h/w or user must specify it
+                if not self.scaleup_group_size:
+                    self.get_scaleup_group_size()
                 if self.node_id < 0:
                     self.exit_demo(f'[validate_arguments] Argument node_id was set to: {self.node_id}')
                 if self.nranks < 1:
@@ -192,7 +184,7 @@ class DemoTest:
                     self.exit_demo(f'[validate_arguments] The option "--mpi" was not used, therefore the following arguments cannot be used: {self.mpi_args}')
                 self.number_of_processes = min(self.ranks_per_node, self.nranks)
                 self.log_debug(f'Number of processes to be used is: {self.number_of_processes}')
-            else:
+            else:   # MPI mode
                 invalid_arguments = []
                 if self.node_id >= 0:
                     invalid_arguments.append("node_id")
@@ -294,6 +286,10 @@ class DemoTest:
                 cmd_args.append("HCCL_DEMO_CHECK_CORRECTNESS=0")
 
             cmd_args.append("HCCL_DEMO_TEST_LOOP="     + str(self.loop))
+
+            if self.scaleout_bw:
+                cmd_args.append("HCCL_EXPECTED_SCALEOUT_BW=" + self.parse_size(self.scaleout_bw, is_memory_size=False))
+
             if self.ranks_list:
                 cmd_args.append("HCCL_RANKS_LIST="        + str(self.ranks_list))
             cmd_args.append("HCCL_DEMO_TEST_ROOT="     + str(self.test_root))
@@ -309,8 +305,15 @@ class DemoTest:
                 cmd_args.append("ID=" + str(rank))
                 cmd_args.append("HCCL_RANK=" + str(rank))
                 cmd_args.append("HCCL_NRANKS=" + str(self.nranks))
-                cmd_args.append("HCCL_BOX_SIZE=" + str(self.ranks_per_node))
+                cmd_args.append("HCCL_RANKS_PER_NODE=" + str(self.ranks_per_node))
+                cmd_args.append("HCCL_SCALEUP_GROUP_SIZE=" + str(self.scaleup_group_size))
                 cmd_args.append(self.demo_exe)
+            else:   # MPI
+                if self.scaleup_group_size is not None:
+                    cmd_args.append("HCCL_SCALEUP_GROUP_SIZE=" + str(self.scaleup_group_size))
+
+            cmd_args.append("HCCL_REDUCTION_OP=" + self.reduction_op)
+
             cmd = " ".join(cmd_args)
             return cmd
         except Exception as e:
@@ -518,16 +521,20 @@ class DemoTest:
             self.log_error(f'[apply_mpi_defaults] {e}', exception=True)
             raise Exception(e)
 
-    def parse_size(self, input_size):
+    def parse_size(self, input_size, is_memory_size=True):
         '''The following method is used to parse the size to be sent.
            The format of the size would be <size><unit> , for example: 4G.
            One of the following sizes can be requested: G/M/K/B (not case sensitive).
            The unit is optional, if omitted the default unit <B> will be used.'''
         try:
+            kilo = 1000
+            if is_memory_size:
+                kilo = 1024
+
             size = str(input_size)
-            units_dict = {"G": 1024*1024*1024,
-                          "M": 1024*1024,
-                          "K": 1024,
+            units_dict = {"G": kilo * kilo * kilo,
+                          "M": kilo * kilo,
+                          "K": kilo,
                           "B": 1}
 
             unit = size[-1].upper()
@@ -605,11 +612,21 @@ class DemoTest:
             ranks_per_node = self.run_command("lspci | grep -c -E '(Habana|1da3)'")
             if (ranks_per_node[0] != '0'):
                 self.ranks_per_node = int(ranks_per_node[0])
-                self.log_debug(f'The user did not set --ranks_per_node. lscpi command found {self.ranks_per_node} ranks per node.')
+                self.log_info(f'The user did not set --ranks_per_node. lscpi command found {self.ranks_per_node} ranks per node.')
             else:
-                self.exit_demo(f'[get_ranks_per_node] The user did not set --ranks_per_node. lscpi command did not found number of ranks. Please provide --ranks_per_node.')
+                self.exit_demo(f'[get_ranks_per_node] The user did not set --ranks_per_node. lscpi command did not find number of ranks. Please provide --ranks_per_node.')
         except Exception as e:
             self.log_error(f'[get_ranks_per_node] {e}' ,exception=True)
+            raise Exception(e)
+
+    def get_scaleup_group_size(self):
+        '''The following method is used to set the scaleup group size
+           In case it is not supplied by user, by default its ranks_per_node'''
+        try:
+            self.scaleup_group_size = self.ranks_per_node
+            self.log_info(f'The user did not set --scaleup_group_size. It is set to {self.ranks_per_node}')
+        except Exception as e:
+            self.log_error(f'[get_scaleup_group_size] {e}' ,exception=True)
             raise Exception(e)
 
     def get_env(self):

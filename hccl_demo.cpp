@@ -45,6 +45,16 @@
 constexpr int      INVALID_RANK      = -1;
 constexpr int      master_mpi_rank   = 0;
 
+// scale_test specific constants
+constexpr float SCALE_VALIDATION_MARGIN = 0.05;  // fraction of expected BW
+
+enum class CONTROL_TYPE : uint8_t
+{
+    SEND = 1,
+    RECEIVE,
+    END,
+};
+
 #if MPI_ENABLED
 // Open MPI (v4.0.2)
 #include <mpi.h>
@@ -77,6 +87,12 @@ using Clock = chrono::high_resolution_clock;
             throw runtime_error {"In function " + string {__FUNCTION__} +                                              \
                                  "(): " #x " failed with synapse error: " + to_string((_res))};                        \
     }
+
+#define ASSERT(x)                                                                                                      \
+    do                                                                                                                 \
+    {                                                                                                                  \
+        if (!(x)) throw runtime_error {"In function " + string {__FUNCTION__} + " assertion failed"};                  \
+    } while (false)
 
 inline uint16_t floatToBf16(const float f)
 {
@@ -226,7 +242,7 @@ bool should_report_stat(int rank)
 inline string format_bw(const double bytes_per_sec)
 {
     stringstream ss;
-    ss << fixed << setprecision(3) << bytes_per_sec / 1e6 << " MB/s";
+    ss << fixed << setprecision(6) << bytes_per_sec / 1e9 << " GB/s";
     return ss.str();
 }
 
@@ -281,21 +297,39 @@ std::string get_demo_str_data_type()
     return (env_value != nullptr) ? string(env_value) : default_data_type;
 }
 
-int get_demo_box_size()
+int get_demo_ranks_per_node()
 {
     static bool is_cached = false;
-    static auto box_size  = DEFAULT_BOX_SIZE;
+    static auto ranks_per_node = DEFAULT_BOX_SIZE;
     if (!is_cached)
     {
 #if MPI_ENABLED
         char* env_value = getenv("OMPI_COMM_WORLD_LOCAL_SIZE");
 #else
-        char* env_value = getenv("HCCL_BOX_SIZE");
+        char* env_value = getenv("HCCL_RANKS_PER_NODE");
 #endif
-        box_size        = (env_value != nullptr) ? atoi(env_value) : box_size;
+        ranks_per_node  = (env_value != nullptr) ? atoi(env_value) : ranks_per_node;
         is_cached       = true;
     }
-    return box_size;
+    return ranks_per_node;
+}
+
+int get_demo_scaleup_group_size()
+{
+    static bool is_cached          = false;
+    static auto scaleup_group_size = 0;
+    if (!is_cached)
+    {
+        char* env_value = getenv("HCCL_SCALEUP_GROUP_SIZE");  // Allow override for both MPI and non-MPI
+        if (env_value == nullptr)
+        {
+            // get default value from MPI if possible or use ranks_per_node as default
+            env_value = getenv("OMPI_COMM_WORLD_LOCAL_SIZE");
+        }
+        scaleup_group_size = (env_value != nullptr) ? atoi(env_value) : get_demo_ranks_per_node();
+        is_cached          = true;
+    }
+    return scaleup_group_size;
 }
 
 int get_demo_test_root()
@@ -365,14 +399,12 @@ uint64_t get_demo_size_inc()
 
 bool is_master_rank(const int hccl_rank)
 {
-    if (hccl_rank == master_mpi_rank) return true;
-    return false;
+    return hccl_rank == master_mpi_rank;
 }
 
 bool is_master_rank_unique_id(hccl_demo_data demo_data, const int hccl_rank)
 {
-    if (hccl_rank == demo_data.mpi_root_rank) return true;
-    return false;
+    return hccl_rank == demo_data.mpi_root_rank;
 }
 
 bool should_write_report(const int hccl_rank)
@@ -420,6 +452,44 @@ string get_demo_custom_comm()
     char*         env_value   = getenv("HCCL_DEMO_CUSTOM_COMM");
     custom_comm               = (env_value != nullptr) ? string(env_value) : custom_comm;
     return custom_comm;
+}
+
+synDeviceType get_device_type(const synDeviceId deviceId)
+{
+    synDeviceInfoV2 deviceInfo;
+    CHECK_SYNAPSE_STATUS(synDeviceGetInfoV2(deviceId, &deviceInfo));
+    return deviceInfo.deviceType;
+}
+
+uint64_t get_demo_expected_scaleup_bw(const synDeviceId deviceId)
+{
+    synDeviceType deviceType = get_device_type(deviceId);
+    switch (deviceType)
+    {
+        case synDeviceGaudi: return 12.5e9;
+        case synDeviceGaudi2: return 37.5e9;
+        case synDeviceGaudi3: return 75e9;
+        default:
+            log() << "Unknown device, setting expected scaleup bandwidth to 37.5GB" << endl;
+            return 37.5e9;
+    }
+}
+
+uint64_t get_demo_expected_scaleout_bw()
+{
+    static bool     is_cached        = false;
+    static uint64_t test_expected_bw = 0;
+    if (!is_cached)
+    {
+        const char* const env_value = getenv("HCCL_EXPECTED_SCALEOUT_BW");
+        if (env_value == nullptr)
+        {
+            throw std::runtime_error {"missing mandatory argument for scale validation: --scaleout_bw"};
+        }
+        test_expected_bw = strtoull(env_value, NULL, 0);
+        is_cached        = true;
+    }
+    return test_expected_bw;
 }
 
 inline void ParseCustomCommEnv(string rank_list, vector<int>& parsed_rank_list)
@@ -525,6 +595,24 @@ std::string get_ranks_list()
     static const string default_ranks_list = string {""};
     const char*         env_value          = getenv("HCCL_RANKS_LIST");
     return (env_value != nullptr) ? string(env_value) : default_ranks_list;
+}
+
+std::string get_reduction_op_str()
+{
+    const char* env_value = getenv("HCCL_REDUCTION_OP");
+    if (env_value != nullptr) return string(env_value);
+    throw std::runtime_error {" Unknown reduction op."};
+}
+
+hcclRedOp_t get_reduction_op()
+{
+    const char* env_value = getenv("HCCL_REDUCTION_OP");
+
+    if (0 == strcmp(env_value, "sum")) return hcclSum;
+    if (0 == strcmp(env_value, "min")) return hcclMin;
+    if (0 == strcmp(env_value, "max")) return hcclMax;
+
+    throw std::runtime_error {" Unknown reduction op."};
 }
 
 uint64_t get_usable_memory(const synDeviceId device_id)
@@ -744,17 +832,18 @@ static bool send_recv_test_driver(hccl_demo_data&             demo_data,
 
     bool is_ok = true;
     const double       send_recv_factor = 1;
-    const unsigned int boxSize          = static_cast<unsigned>(get_demo_box_size());
+    // const unsigned int boxSize          = static_cast<unsigned>(get_demo_ranks_per_node());
+    const unsigned int scaleupGroupSize = get_demo_scaleup_group_size();
     const unsigned int numOfRanks       = demo_data.nranks;
-    unsigned int       numOfBoxes       = numOfRanks / boxSize;
-    if (numOfRanks % boxSize > 0)
+    unsigned int       numOfBoxes       = numOfRanks / scaleupGroupSize;
+    if (numOfRanks % scaleupGroupSize > 0)
     {
         numOfBoxes++;
     }
     const unsigned int ranksPerBox = numOfRanks / numOfBoxes;
 
     const unsigned myRank   = static_cast<unsigned>(hccl_rank);
-    const unsigned myBoxNum = myRank / boxSize;
+    const unsigned myBoxNum = myRank / scaleupGroupSize;
 
     int sendToRank   = INVALID_RANK;
     int recvFromRank = INVALID_RANK;
@@ -1011,9 +1100,10 @@ static bool send_recv_ranks_test_driver(hccl_demo_data&             demo_data,
     auto stat = benchmark(
         demo_data,
         [&](uint64_t iter) {
+            uint64_t index = iter % input_dev_ptrs.size();
             CHECK_HCCL_STATUS(send_recv_ranks_test(iter,
                                                    output_dev_ptrs,
-                                                   (const void*) input_dev_ptrs[iter],
+                                                   (const void*) input_dev_ptrs[index],
                                                    count,
                                                    demo_data.hccl_comm,
                                                    demo_data.collective_stream,
@@ -1021,7 +1111,17 @@ static bool send_recv_ranks_test_driver(hccl_demo_data&             demo_data,
                                                    sendToRanks,
                                                    demo_data.hccl_data_type));
         },
-        []() -> void {});
+        [&]() -> void {
+            CHECK_HCCL_STATUS(send_recv_ranks_test(0,
+                                                   output_dev_ptrs,
+                                                   (const void*) input_dev_ptrs[0],
+                                                   count,
+                                                   demo_data.hccl_comm,
+                                                   demo_data.collective_stream,
+                                                   recvFromRanks,
+                                                   sendToRanks,
+                                                   demo_data.hccl_data_type));
+        });
 
     describe_stat("hcclSendRecv(src!=dst, data_size=" + to_string(data_size) +
                       ", count=" + to_string(input_host_data.size()) + ", dtype=" + demo_data.str_data_type +
@@ -1036,6 +1136,263 @@ static bool send_recv_ranks_test_driver(hccl_demo_data&             demo_data,
                   "",
                   ((demo_data.hccl_rank == reportingReceiverRank) || (demo_data.hccl_rank == reportingSenderRank)));
     return true;
+}
+
+static void scaleup_pairs(const int nranksGroupSize, std::vector<RanksPairSendRecv>& ranksList)
+{
+    const int scaleupGroupSize = get_demo_scaleup_group_size();
+
+    for (int sender = 0; sender < nranksGroupSize; sender++)
+    {
+        int boxNum = sender / scaleupGroupSize;
+        for (int receiver = boxNum * scaleupGroupSize; receiver < (boxNum + 1) * scaleupGroupSize; receiver++)
+        {
+            if (sender == receiver) continue;
+            ranksList.push_back({sender, receiver});
+        }
+    }
+}
+
+static void scaleout_pairs(const int nranksGroupSize, std::vector<RanksPairSendRecv>& ranksList)
+{
+    const int scaleupGroupSize = get_demo_scaleup_group_size();
+
+    for (int sender = 0; sender < nranksGroupSize; sender++)
+    {
+        for (int receiver = sender % scaleupGroupSize; receiver < nranksGroupSize; receiver += scaleupGroupSize)
+        {
+            if (sender == receiver) continue;
+            ranksList.push_back({sender, receiver});
+        }
+    }
+}
+
+static void scale_test_send(hccl_demo_data& demo_data,
+                            int             receiver,
+                            uint64_t        count,
+                            uint64_t        data_size,
+                            uint64_t        input_dev_ptr,
+                            uint64_t&       result)
+{
+    // run single iteration as warmup
+    CHECK_HCCL_STATUS(hcclSend((void*) input_dev_ptr,
+                               count,
+                               demo_data.hccl_data_type,
+                               receiver,
+                               demo_data.hccl_comm,
+                               demo_data.collective_stream));
+
+    CHECK_SYNAPSE_STATUS(synStreamSynchronize(demo_data.collective_stream));
+
+    auto start_time = Clock::now();
+    for (size_t i = 0; i < demo_data.num_iters; ++i)
+    {
+        CHECK_HCCL_STATUS(hcclSend((void*) input_dev_ptr,
+                                   count,
+                                   demo_data.hccl_data_type,
+                                   receiver,
+                                   demo_data.hccl_comm,
+                                   demo_data.collective_stream));
+    }
+
+    // calculate result
+    CHECK_SYNAPSE_STATUS(synStreamSynchronize(demo_data.collective_stream));
+
+    auto duration             = Clock::now() - start_time;
+    auto rank_duration_in_sec = chrono::duration_cast<chrono::duration<double>>(duration).count();
+    rank_duration_in_sec      = rank_duration_in_sec / demo_data.num_iters;
+    result                    = data_size / rank_duration_in_sec;
+}
+
+static void scale_test_receive(hccl_demo_data& demo_data, int sender, uint64_t count, uint64_t output_dev_ptr)
+{
+    // run single iteration as warmup
+    CHECK_HCCL_STATUS(hcclRecv((void*) output_dev_ptr,
+                               count,
+                               demo_data.hccl_data_type,
+                               sender,
+                               demo_data.hccl_comm,
+                               demo_data.collective_stream));
+
+    for (size_t i = 0; i < demo_data.num_iters; ++i)
+    {
+        CHECK_HCCL_STATUS(hcclRecv((void*) output_dev_ptr,
+                                   count,
+                                   demo_data.hccl_data_type,
+                                   sender,
+                                   demo_data.hccl_comm,
+                                   demo_data.collective_stream));
+    }
+}
+
+static void scale_test_end(const int nranksGroupSize)
+{
+    for (int rank = 0; rank < nranksGroupSize; rank++)
+    {
+        if (!is_master_rank(rank))
+        {
+            CONTROL_TYPE control = CONTROL_TYPE::END;
+            CHECK_MPI_STATUS(MPI_Send((void*) &control, 1, MPI_UINT8_T, rank, 0, MPI_COMM_WORLD));
+        }
+    }
+}
+
+static void scale_test_server_step(hccl_demo_data& demo_data,
+                                   int             sender,
+                                   int             receiver,
+                                   uint64_t        count,
+                                   uint64_t        data_size,
+                                   uint64_t        input_dev_ptr,
+                                   uint64_t        output_dev_ptr)
+{
+    CONTROL_TYPE control;
+    MPI_Status   status;
+
+    // trigger receiver
+    if (demo_data.hccl_rank != receiver)  // do server receive only after sending send request
+    {
+        control = CONTROL_TYPE::RECEIVE;
+        CHECK_MPI_STATUS(MPI_Send((void*) &control, 1, MPI_UINT8_T, receiver, 0, MPI_COMM_WORLD));
+        CHECK_MPI_STATUS(MPI_Send((void*) &sender, 1, MPI_INT, receiver, 0, MPI_COMM_WORLD));
+    }
+
+    // trigger sender
+    if (demo_data.hccl_rank != sender)  // server send at the result stage
+    {
+        control = CONTROL_TYPE::SEND;
+        CHECK_MPI_STATUS(MPI_Send((void*) &control, 1, MPI_UINT8_T, sender, 0, MPI_COMM_WORLD));
+        CHECK_MPI_STATUS(MPI_Send((void*) &receiver, 1, MPI_INT, sender, 0, MPI_COMM_WORLD));
+    }
+
+    // server receive
+    if (demo_data.hccl_rank == receiver)
+    {
+        scale_test_receive(demo_data, sender, count, output_dev_ptr);
+    }
+
+    // get result
+    uint64_t result;
+    if (demo_data.hccl_rank == sender)
+    {
+        scale_test_send(demo_data, receiver, count, data_size, input_dev_ptr, result);
+    }
+    else
+    {
+        // wait for result
+        CHECK_MPI_STATUS(MPI_Recv((void*) &result, 1, MPI_UINT64_T, sender, 0, MPI_COMM_WORLD, &status))
+    }
+
+    // log
+    const int scaleupGroupSize = get_demo_scaleup_group_size();
+    uint64_t  expected_result  = (sender / scaleupGroupSize) == (receiver / scaleupGroupSize)
+                                     ? get_demo_expected_scaleup_bw(demo_data.device_handle)
+                                     : get_demo_expected_scaleout_bw();
+
+    if (result < (expected_result - SCALE_VALIDATION_MARGIN * expected_result))
+    {
+        log() << sender << "-->" << receiver << ": " << format_bw(result) << " (" << result * 100 / expected_result
+              << "%)" << endl;
+    }
+}
+
+static void scale_test_client(
+    hccl_demo_data& demo_data, uint64_t count, uint64_t data_size, uint64_t input_dev_ptr, uint64_t output_dev_ptr)
+{
+    while (true)
+    {
+        MPI_Status   status;
+        CONTROL_TYPE control;
+        CHECK_MPI_STATUS(MPI_Recv((void*) &control, 1, MPI_UINT8_T, master_mpi_rank, 0, MPI_COMM_WORLD, &status))
+
+        switch (control)
+        {
+            case CONTROL_TYPE::END:
+                return;
+            case CONTROL_TYPE::SEND:
+                uint64_t result;
+                int      receiver;
+                CHECK_MPI_STATUS(MPI_Recv((void*) &receiver, 1, MPI_INT, master_mpi_rank, 0, MPI_COMM_WORLD, &status))
+                scale_test_send(demo_data, receiver, count, data_size, input_dev_ptr, result);
+
+                // send result to server
+                CHECK_MPI_STATUS(MPI_Send((void*) &result, 1, MPI_UINT64_T, master_mpi_rank, 0, MPI_COMM_WORLD));
+                break;
+            case CONTROL_TYPE::RECEIVE:
+                int sender;
+                CHECK_MPI_STATUS(MPI_Recv((void*) &sender, 1, MPI_INT, master_mpi_rank, 0, MPI_COMM_WORLD, &status))
+                scale_test_receive(demo_data, sender, count, output_dev_ptr);
+                break;
+            default:
+                throw std::runtime_error {" Unexpected control message type"};
+        }
+    }
+}
+
+static void scale_test_common_driver(hccl_demo_data&                 demo_data,
+                                     uint64_t                        count,
+                                     uint64_t                        data_size,
+                                     uint64_t                        input_dev_ptr,
+                                     uint64_t                        output_dev_ptr,
+                                     std::vector<RanksPairSendRecv>& ranksPairsList)
+{
+    if (is_master_rank(demo_data.hccl_rank))
+    {
+        for (RanksPairSendRecv pair : ranksPairsList)
+        {
+            scale_test_server_step(demo_data,
+                                   pair.sendFromRank,
+                                   pair.recvInRank,
+                                   count,
+                                   data_size,
+                                   input_dev_ptr,
+                                   output_dev_ptr);
+        }
+        scale_test_end(demo_data.nranks);
+    }
+    else
+    {
+        scale_test_client(demo_data, count, data_size, input_dev_ptr, output_dev_ptr);
+    }
+}
+
+static void scale_test_driver(hccl_demo_data& demo_data,
+                              const uint64_t  count,
+                              const uint64_t  data_size,
+                              const uint64_t  input_dev_ptr,
+                              uint64_t        output_dev_ptr)
+{
+    // scaleup
+    if (is_master_rank(demo_data.hccl_rank))
+    {
+        log() << "ScaleUp - Expected " << format_bw(get_demo_expected_scaleup_bw(demo_data.device_handle)) << endl;
+    }
+    std::vector<RanksPairSendRecv> scaleupPairsList;
+    scaleup_pairs(demo_data.nranks, scaleupPairsList);
+    scale_test_common_driver(demo_data, count, data_size, input_dev_ptr, output_dev_ptr, scaleupPairsList);
+
+    // scaleout
+    if (demo_data.nranks > (size_t) get_demo_ranks_per_node())
+    {
+        if (is_master_rank(demo_data.hccl_rank))
+        {
+            log() << "ScaleOut - Expected " << format_bw(get_demo_expected_scaleout_bw()) << endl;
+        }
+        std::vector<RanksPairSendRecv> scaleoutPairsList;
+        scaleout_pairs(demo_data.nranks, scaleoutPairsList);
+        scale_test_common_driver(demo_data, count, data_size, input_dev_ptr, output_dev_ptr, scaleoutPairsList);
+    }
+}
+
+template<class T>
+T calc_expected_reduction(std::vector<T>& args, hcclRedOp_t reduction_op)
+{
+    switch (reduction_op)
+    {
+        case hcclSum: return std::accumulate(args.cbegin(), args.cend(), 0);
+        case hcclMin: return *std::min_element(args.cbegin(), args.cend());
+        case hcclMax: return *std::max_element(args.cbegin(), args.cend());
+        default: throw std::runtime_error {" Unknown reduction op."};
+    }
 }
 
 template<class T>
@@ -1255,7 +1612,7 @@ int run_test(hccl_demo_data demo_data, bool bf16_convert, const synModuleId devi
                                                     (void*) output_dev_ptrs[index],
                                                     input_host_data.size(),
                                                     get_demo_hccl_data_type(),
-                                                    hcclSum,
+                                                    get_reduction_op(),
                                                     demo_data.hccl_comm,
                                                     demo_data.collective_stream));
                 },
@@ -1264,7 +1621,7 @@ int run_test(hccl_demo_data demo_data, bool bf16_convert, const synModuleId devi
                                                     (void*) correctness_dev_ptr,
                                                     input_host_data.size(),
                                                     get_demo_hccl_data_type(),
-                                                    hcclSum,
+                                                    get_reduction_op(),
                                                     demo_data.hccl_comm,
                                                     demo_data.collective_stream));
                 });
@@ -1284,30 +1641,24 @@ int run_test(hccl_demo_data demo_data, bool bf16_convert, const synModuleId devi
             size_t loop_size = output_size / data_type_size;
             if (check_correctness())
             {
-                int    start = 0;
-                int    end   = demo_data.nranks - 1;
-                int    expected;
-                int    addCommSize;
-                if (bf16_convert)
+                for (size_t i = 0; i < loop_size; ++i)
                 {
-                    for (size_t i = 0; i < loop_size; ++i)
+                    vector<T> vec(demo_data.nranks);
+                    size_t    addCommSize = demo_data.nranks * (i % DATA_ELEMENTS_MAX);
+                    // Arithmetic progression
+                    for (size_t rank = 0; rank < demo_data.nranks; ++rank)
                     {
-                        addCommSize = demo_data.nranks * (i % DATA_ELEMENTS_MAX);
-
-                        // Arithmetic progression
-                        expected = ((start + addCommSize) + (end + addCommSize)) * demo_data.nranks / 2;
-                        is_ok    = correctness_check_function(demo_data, expected, bf16ToFloat(output_host_data[i]), i);
+                        vec[rank] = rank + addCommSize;
                     }
-                }
-                else
-                {
-                    for (size_t i = 0; i < loop_size; ++i)
-                    {
-                        addCommSize = demo_data.nranks * (i % DATA_ELEMENTS_MAX);
+                    T expected = calc_expected_reduction<T>(vec, get_reduction_op());
 
-                        // Arithmetic progression
-                        expected = ((start + addCommSize) + (end + addCommSize)) * demo_data.nranks / 2;
-                        if (abs((float) output_host_data[i] - expected) != 0)
+                    if (bf16_convert)
+                    {
+                        is_ok = correctness_check_function(demo_data, expected, bf16ToFloat(output_host_data[i]), i);
+                    }
+                    else
+                    {
+                        if (std::abs((float) output_host_data[i] - expected) != 0)
                         {
                             is_ok = false;
                         }
@@ -1340,7 +1691,7 @@ int run_test(hccl_demo_data demo_data, bool bf16_convert, const synModuleId devi
                           demo_data.num_iters,
                           test_type,
                           demo_data.str_data_type,
-                          "sum",
+                          get_reduction_op_str(),
                           is_root_rank);
         }
         else if (test_type == "reduce_scatter")
@@ -1383,7 +1734,7 @@ int run_test(hccl_demo_data demo_data, bool bf16_convert, const synModuleId devi
                                                         (void*) output_dev_ptrs[index],
                                                         input_host_data.size() / demo_data.nranks,
                                                         get_demo_hccl_data_type(),
-                                                        hcclSum,
+                                                        get_reduction_op(),
                                                         demo_data.hccl_comm,
                                                         demo_data.collective_stream));
                 },
@@ -1392,7 +1743,7 @@ int run_test(hccl_demo_data demo_data, bool bf16_convert, const synModuleId devi
                                                         (void*) correctness_dev_ptr,
                                                         input_host_data.size() / demo_data.nranks,
                                                         get_demo_hccl_data_type(),
-                                                        hcclSum,
+                                                        get_reduction_op(),
                                                         demo_data.hccl_comm,
                                                         demo_data.collective_stream));
                 });
@@ -1409,36 +1760,28 @@ int run_test(hccl_demo_data demo_data, bool bf16_convert, const synModuleId devi
                                                  DRAM_TO_HOST));
             CHECK_SYNAPSE_STATUS(synStreamSynchronize(demo_data.device_to_host_stream));
 
-            int data_size_loop = output_host_data.size() / demo_data.nranks;
+            size_t data_size_loop = output_host_data.size() / demo_data.nranks;
             if (check_correctness())
             {
-                int start;
-                int end;
-                int expected       = 0;
-                if (bf16_convert)
+                size_t start = demo_data.hccl_rank * data_size_loop;
+                for (size_t i = 0; i < data_size_loop; ++i)
                 {
-                    for (int i = 0; i < data_size_loop; ++i)
+                    vector<T> vec(demo_data.nranks);
+                    size_t    addCommSize = demo_data.nranks * ((start + i) % DATA_ELEMENTS_MAX);
+                    // Arithmetic progression
+                    for (size_t rank = 0; rank < demo_data.nranks; ++rank)
                     {
-                        start = (demo_data.hccl_rank * data_size_loop) % DATA_ELEMENTS_MAX * demo_data.nranks;
-                        end   = start + (demo_data.nranks - 1);
-                        // Arithmetic progression
-                        expected = (((start + demo_data.nranks * i) % (demo_data.nranks * DATA_ELEMENTS_MAX)) +
-                                    ((end + demo_data.nranks * i) % (demo_data.nranks * DATA_ELEMENTS_MAX))) *
-                                   demo_data.nranks / 2;
+                        vec[rank] = rank + addCommSize;
+                    }
+                    T expected = calc_expected_reduction<T>(vec, get_reduction_op());
+
+                    if (bf16_convert)
+                    {
                         is_ok = correctness_check_function(demo_data, expected, bf16ToFloat(output_host_data[i]), i);
                     }
-                }
-                else
-                {
-                    for (int i = 0; i < data_size_loop; ++i)
+                    else
                     {
-                        start = (demo_data.hccl_rank * data_size_loop) % DATA_ELEMENTS_MAX * demo_data.nranks;
-                        end   = start + (demo_data.nranks - 1);
-                        // Arithmetic progression
-                        expected = (((start + demo_data.nranks * i) % (demo_data.nranks * DATA_ELEMENTS_MAX)) +
-                                    ((end + demo_data.nranks * i) % (demo_data.nranks * DATA_ELEMENTS_MAX))) *
-                                   demo_data.nranks / 2;
-                        if (abs(output_host_data[i] - (float) expected) != 0)
+                        if (std::abs((float) output_host_data[i] - expected) != 0)
                         {
                             is_ok = false;
                         }
@@ -1797,6 +2140,7 @@ int run_test(hccl_demo_data demo_data, bool bf16_convert, const synModuleId devi
 
             CHECK_SYNAPSE_STATUS(synStreamSynchronize(demo_data.host_to_device_stream));
             // Run HCCL Reduce collective
+
             auto stat = benchmark(
                 demo_data,
                 [&](uint64_t iter) {
@@ -1805,7 +2149,7 @@ int run_test(hccl_demo_data demo_data, bool bf16_convert, const synModuleId devi
                                                  (void*) output_dev_ptrs[index],
                                                  input_host_data.size(),
                                                  get_demo_hccl_data_type(),
-                                                 hcclSum,
+                                                 get_reduction_op(),
                                                  root,
                                                  demo_data.hccl_comm,
                                                  demo_data.collective_stream));
@@ -1815,7 +2159,7 @@ int run_test(hccl_demo_data demo_data, bool bf16_convert, const synModuleId devi
                                                  (void*) correctness_dev_ptr,
                                                  input_host_data.size(),
                                                  get_demo_hccl_data_type(),
-                                                 hcclSum,
+                                                 get_reduction_op(),
                                                  root,
                                                  demo_data.hccl_comm,
                                                  demo_data.collective_stream));
@@ -1843,28 +2187,24 @@ int run_test(hccl_demo_data demo_data, bool bf16_convert, const synModuleId devi
                                                          DRAM_TO_HOST));
                     CHECK_SYNAPSE_STATUS(synStreamSynchronize(demo_data.device_to_host_stream));
 
-                    int start = 0;
-                    int end   = demo_data.nranks - 1;
-                    int expected;
-                    int addCommSize;
-                    if (bf16_convert)
+                    for (size_t i = 0; i < loop_size; ++i)
                     {
-                        for (size_t i = 0; i < loop_size; ++i)
+                        vector<T> vec(demo_data.nranks);
+                        size_t addCommSize = demo_data.nranks * (i % DATA_ELEMENTS_MAX);
+                        // Arithmetic progression
+                        for (size_t rank = 0; rank < demo_data.nranks; ++rank)
                         {
-                            addCommSize = demo_data.nranks * (i % DATA_ELEMENTS_MAX);
-                            // Arithmetic progression
-                            expected = ((start + addCommSize) + (end + addCommSize)) * demo_data.nranks / 2;
+                            vec[rank] = rank + addCommSize;
+                        }
+                        T expected = calc_expected_reduction<T>(vec, get_reduction_op());
+
+                        if (bf16_convert)
+                        {
                             is_ok =
                                 correctness_check_function(demo_data, expected, bf16ToFloat(output_host_data[i]), i);
                         }
-                    }
-                    else
-                    {
-                        for (size_t i = 0; i < loop_size; ++i)
+                        else
                         {
-                            addCommSize = demo_data.nranks * (i % DATA_ELEMENTS_MAX);
-                            // Arithmetic progression
-                            expected = ((start + addCommSize) + (end + addCommSize)) * demo_data.nranks / 2;
                             if (std::abs((float) output_host_data[i] - expected) != 0)
                             {
                                 is_ok = false;
@@ -1897,8 +2237,17 @@ int run_test(hccl_demo_data demo_data, bool bf16_convert, const synModuleId devi
                           demo_data.num_iters,
                           test_type,
                           demo_data.str_data_type,
-                          "sum",
+                          get_reduction_op_str(),
                           is_root_rank);
+        }
+        else if (test_type == "scale_validation")
+        {
+#ifndef MPI_ENABLED
+            throw std::runtime_error {"MPI must be enabled for scale validation test"};
+#endif  //MPI_ENABLED
+
+            // since there is no correctness check here the data can be random (no need to initialize)
+            scale_test_driver(demo_data, count, data_size, input_dev_ptr, output_dev_ptr);
         }
         else
         {
@@ -1988,7 +2337,7 @@ int main()
         // Initialize Synapse API context
         CHECK_SYNAPSE_STATUS(synInitialize());
         // Acquire device
-        synModuleId device_module_id = get_hccl_rank() % get_demo_box_size();
+        synModuleId device_module_id = get_hccl_rank() % get_demo_ranks_per_node();
         synStatus   rc               = synDeviceAcquireByModuleId(&demo_data.device_handle, device_module_id);
         if (rc != synSuccess)
         {

@@ -145,26 +145,41 @@ This mode is supported with Verbs or EFA provider if the following conditions ar
 4. PCIe ACS (Access Control) should be disabled
 
 ## Python Wrapper Arguments
-    --nranks           - int, Number of ranks participating in the demo
-    --ranks_per_node   - int, Number of ranks participating in the demo for current node
-    --node_id          - int, ID of the running host. Each host should have unique id between 0-num_nodes
-    --test             - str, Which hccl test to run (for example: broadcast/all_reduce) (default: broadcast)
-    --size             - str, Data size in units of G,M,K,B or no unit (default: 33554432 Bytes)
-    --data_type        - str, Type of data, float or bfloat16 (default: float)
-    --loop             - int, Number of iterations (must be positive, default: 10)
-    --ranks_list       - str, Comma separated list of pairs of ranks for send_recv ranks test only, e.g. 0,8,1,8 (optional, default is to perform regular send_recv test with all ranks)
-    --test_root        - int, Index of root rank for broadcast and reduce tests
-    --csv_path         - str, Path to a file for results output
-    --size_range       - pair of str, Test will run from MIN to MAX, units of G,M,K,B or no unit. Default is Bytes, e.g. --size_range 32B 1M
-    --size_range_inc   - int, Test will run on all multiplies by 2^size_range_inc from MIN to MAX (default: 1)
-    -data_csv          - Creates 2 csv file for each rank, one for data input and second for data output
-    --no_correctness   - disables the correctness check
-    -mpi               - Use MPI for managing execution
-    -clean             - Clear old executable and compile a new one
-    -list              - Display a list of available tests
-    -help              - Display detailed help for HCCL demo in a form of docstring
-    -ignore_mpi_errors - Ignore generic MPI errors
-    -no_color          - Disable the usage of colors in console output
+### General flags
+    -h, --help               Show this help message and exit.
+    --clean, -clean          Clean previous artifacts including logs, recipe and csv results.
+    -list, --list_tests      Display a list of available tests.
+    --doc                    Display detailed help for HCCL demo in a form of docstring.
+### Setup configuration flags
+    --nranks NRANKS          Number of ranks in the communicator.
+    --ranks_per_node RANKS_PER_NODE
+                             Number of ranks per node (default read from h/w or set by MPI)
+    --scaleup_group_size     The scaleup group size per node (default is ranks_per_node)
+    --node_id NODE_ID        Box index. Value in the range of (0, NUM_BOXES).
+    --mpi, -mpi              Use MPI for managing execution.
+### Test control flags
+    --test TEST              Specify test (use '-l' option for test list).
+    --size N                 Data size in units of G,M,K,B or no unit. Default is Bytes.
+    --size_range MIN MAX     Test will run from MIN to MAX, units of G,M,K,B or no unit. Default is Bytes. E.g. --size_range 32B 1M.
+    --size_range_inc M       Test will run on all multiplies by 2^size_range_inc from MIN to MAX.
+    --loop LOOP              Number of loop iterations.
+    --test_root TEST_ROOT
+                             Index of root rank for broadcast and reduce tests (optional).
+    --ranks_list RANKS_LIST  List of pairs of ranks for send_recv ranks scaleout. E.g. 0,8,1,8 (optional).
+    --data_type DATA_TYPE    Data type, float or bfloat16. Default is float.
+    --custom_comm CUSTOM_COMM
+                             List of HCCL process that will open a communicator.
+    --no_correctness         Skip correctness validation.
+    --reduction_op           <sum|min|max> (default=sum)
+### Logging flags
+    --csv_path CSV_PATH      Path to a file for results output (optional).
+    --ignore_mpi_errors, -ignore_mpi_errors
+                             Ignore generic MPI errors.
+    --no_color, -no_color
+                             Disable colored output in terminal.
+    --data_csv, -data_csv
+                             Creates 2 csv file for each rank, one for data input and second for data output.
+
 
 ## Environment Variables
     HCCL_COMM_ID     - IP of node_id=0 host and an available port, in the format <IP:PORT>
@@ -198,8 +213,8 @@ Output example:
 
     ###############################################################################
     [BENCHMARK] hcclAllReduce(src!=dst, count=8388608, dtype=float, iterations=1000)
-    [BENCHMARK]     NW Bandwidth   : <Test results> MB/s
-    [BENCHMARK]     Algo Bandwidth : <Test results> MB/s
+    [BENCHMARK]     NW Bandwidth   : <Test results> GB/s
+    [BENCHMARK]     Algo Bandwidth : <Test results> GB/s
     ###############################################################################
 
 Different options for running one server with 8 ranks and size of 32 MB:
@@ -225,8 +240,8 @@ First server output:
 
     ###############################################################################
     [BENCHMARK] hcclAllReduce(src!=dst, count=8388608, dtype=float, iterations=1000)
-    [BENCHMARK]     NW Bandwidth     : <Test results> MB/s
-    [BENCHMARK]     Algo Bandwidth   : <Test results> MB/s
+    [BENCHMARK]     NW Bandwidth     : <Test results> GB/s
+    [BENCHMARK]     Algo Bandwidth   : <Test results> GB/s
     ###############################################################################
 
 ### Running HCCL with size range on 1 server (8 Gaudi devices)
@@ -277,8 +292,8 @@ Output example:
 
     ###############################################################################
     [BENCHMARK] hcclAllReduce(src!=dst, count=8388608, dtype=float, iterations=1000)
-    [BENCHMARK]     NW Bandwidth     : <Test results> MB/s
-    [BENCHMARK]     Algo Bandwidth   : <Test results> MB/s
+    [BENCHMARK]     NW Bandwidth     : <Test results> GB/s
+    [BENCHMARK]     Algo Bandwidth   : <Test results> GB/s
     ###############################################################################
 
 ### Running HCCL demo on 2 servers (16 Gaudi devices)
@@ -301,8 +316,8 @@ First server output:
 
     ###############################################################################
     [BENCHMARK] hcclAllReduce(src!=dst, count=8388608, dtype=float, iterations=1000)
-    [BENCHMARK]     NW Bandwidth     : <Test results> MB/s
-    [BENCHMARK]     Algo Bandwidth   : <Test results> MB/s
+    [BENCHMARK]     NW Bandwidth     : <Test results> GB/s
+    [BENCHMARK]     Algo Bandwidth   : <Test results> GB/s
     ###############################################################################
 
 ### Running HCCL demo with custom communicator:
