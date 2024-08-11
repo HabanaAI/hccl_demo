@@ -290,6 +290,8 @@ class DemoTest:
             if self.scaleout_bw:
                 cmd_args.append("HCCL_EXPECTED_SCALEOUT_BW=" + self.parse_size(self.scaleout_bw, is_memory_size=False))
 
+            cmd_args.append("HCCL_REDUCTION_OP=" + self.reduction_op)
+
             if self.ranks_list:
                 cmd_args.append("HCCL_RANKS_LIST="        + str(self.ranks_list))
             cmd_args.append("HCCL_DEMO_TEST_ROOT="     + str(self.test_root))
@@ -311,8 +313,6 @@ class DemoTest:
             else:   # MPI
                 if self.scaleup_group_size is not None:
                     cmd_args.append("HCCL_SCALEUP_GROUP_SIZE=" + str(self.scaleup_group_size))
-
-            cmd_args.append("HCCL_REDUCTION_OP=" + self.reduction_op)
 
             cmd = " ".join(cmd_args)
             return cmd

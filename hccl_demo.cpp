@@ -1138,6 +1138,7 @@ static bool send_recv_ranks_test_driver(hccl_demo_data&             demo_data,
     return true;
 }
 
+#ifdef MPI_ENABLED
 static void scaleup_pairs(const int nranksGroupSize, std::vector<RanksPairSendRecv>& ranksList)
 {
     const int scaleupGroupSize = get_demo_scaleup_group_size();
@@ -1382,6 +1383,7 @@ static void scale_test_driver(hccl_demo_data& demo_data,
         scale_test_common_driver(demo_data, count, data_size, input_dev_ptr, output_dev_ptr, scaleoutPairsList);
     }
 }
+#endif  //MPI_ENABLED
 
 template<class T>
 T calc_expected_reduction(std::vector<T>& args, hcclRedOp_t reduction_op)
@@ -2242,12 +2244,12 @@ int run_test(hccl_demo_data demo_data, bool bf16_convert, const synModuleId devi
         }
         else if (test_type == "scale_validation")
         {
-#ifndef MPI_ENABLED
-            throw std::runtime_error {"MPI must be enabled for scale validation test"};
-#endif  //MPI_ENABLED
-
+#ifdef MPI_ENABLED
             // since there is no correctness check here the data can be random (no need to initialize)
             scale_test_driver(demo_data, count, data_size, input_dev_ptr, output_dev_ptr);
+#else
+            throw std::runtime_error {"MPI must be enabled for scale validation test"};
+#endif  //MPI_ENABLED
         }
         else
         {
