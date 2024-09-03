@@ -6,7 +6,7 @@ This README provides HCCL demo setup and usage as well as example run commands. 
 addition, it provides further setup steps required when using Host NIC Scale out.<br />
 Host NIC Scale out is achieved using OFI. [Host NIC Scale-Out Setup](#Host-NIC-Scale-Out-Setup)<br />
 section details the steps required to download, install and build OFI. It also provides<br />
-the required environment variables to run Host NIC scale-out with Gaudi Direct. <br />
+the required environment variables to run Host NIC scale-out with Gaudi Direct.<br />
 
 ## Supported Collective Operations
 The following lists the supported collective operations:
