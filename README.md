@@ -51,7 +51,7 @@ Please follow the instructions below:<br />
     ```
 2.  Download libfabric tarball from https://github.com/ofiwg/libfabric/releases:
     ```
-    wget  https://github.com/ofiwg/libfabric/releases/download/v$REQUIRED_VERSION/libfabric-$REQUIRED_VERSION.tar.bz2 -P /tmp/libfabric`
+    wget  https://github.com/ofiwg/libfabric/releases/download/v$REQUIRED_VERSION/libfabric-$REQUIRED_VERSION.tar.bz2 -P /tmp/libfabric
     ```
 3.  Store temporary download directory in stack:
     ```
