@@ -117,11 +117,18 @@ create_thread_list()
 
       # Get the corresponding numa node (pcie_numa)
       numa_node=`cat /sys/bus/pci/devices/$pcie_bus_id/numa_node`
+      no_of_sockets=`lscpu |grep Socket|cut -d ":" -f 2`
+      no_of_numanode=`lscpu |grep NUMA|head -1|cut -d ":" -f 2`
+      numa_per_socket=$((no_of_numanode/no_of_sockets))
 
       # Get the list of threads for the main processes
       if [ $numa_node -ge 0 ]; then
          cpulist=`lscpu --parse | grep ",$numa_node,,"`
-
+         # check if sub numa clustering is enabled
+         if [ $no_of_numanode -gt $no_of_sockets ]; then
+                 numa_node=$((numa_node/numa_per_socket))
+                 cpulist=`lscpu -e=CPU,SOCKET| grep -v SOCKET| awk ' { printf("%d,%d,%d,%d,,\n",$1,$1,$2,$2); }'| grep ",$numa_node,,"`
+         fi
          for cpuid in $cpulist; do
              grep "gaudi2" $file_hl_smi > /dev/null
              if [ $? != 0 ]; then
