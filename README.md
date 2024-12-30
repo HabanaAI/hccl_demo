@@ -6,7 +6,7 @@ This README provides HCCL demo setup and usage as well as example run commands. 
 addition, it provides further setup steps required when using Host NIC Scale out.<br />
 Host NIC Scale out is achieved using OFI. [Host NIC Scale-Out Setup](#Host-NIC-Scale-Out-Setup)<br />
 section details the steps required to download, install and build OFI. It also provides<br />
-the required environment variables to run Host NIC scale-out with Gaudi Direct. <br />
+the required environment variables to run Host NIC scale-out with Gaudi Direct.<br />
 
 ## Supported Collective Operations
 The following lists the supported collective operations:
@@ -51,7 +51,7 @@ Please follow the instructions below:<br />
     ```
 2.  Download libfabric tarball from https://github.com/ofiwg/libfabric/releases:
     ```
-    wget  https://github.com/ofiwg/libfabric/releases/download/v$REQUIRED_VERSION/libfabric-$REQUIRED_VERSION.tar.bz2 -P /tmp/libfabric`
+    wget  https://github.com/ofiwg/libfabric/releases/download/v$REQUIRED_VERSION/libfabric-$REQUIRED_VERSION.tar.bz2 -P /tmp/libfabric
     ```
 3.  Store temporary download directory in stack:
     ```
@@ -172,13 +172,14 @@ This mode is supported with Verbs or EFA provider if the following conditions ar
     --no_correctness         Skip correctness validation.
     --reduction_op           <sum|min|max> (default=sum)
 ### Logging flags
-    --csv_path CSV_PATH      Path to a file for results output (optional).
+    --result_csv CSV_FILE      Path to a file for results output (optional).
     --ignore_mpi_errors, -ignore_mpi_errors
                              Ignore generic MPI errors.
     --no_color, -no_color
                              Disable colored output in terminal.
-    --data_csv, -data_csv
+    --data_csv CSV_PATH, -data_csv CSV_PATH
                              Creates 2 csv file for each rank, one for data input and second for data output.
+                             CSV_PATH is the path to a file for results output
 
 
 ## Environment Variables
@@ -197,7 +198,7 @@ Run the execution command
 
 ## Results
 Results are printed to the display<br />
-Results per rank can also be printed to output file by using --csv_path <path_to_file>
+Results per rank can also be printed to output file by using --result_csv <path_to_file>
 
 ## Examples - without MPI
 
@@ -331,7 +332,7 @@ Running on 1 server:
 Running on 2 servers with MPI (16 Gaudi devices):
 
     * Note: When defining custom communicator, for each rank in the communicator we should have at least one more rank included that is a peer to the first one.
-    * In the following examaples we used MPI hostfile, using MPI host is good as well.
+    * In the following examples we used MPI hostfile, using MPI host is good as well.
 
     Configuration: 16 ranks, 32 MB size, all_reduce collective, 1000 iterations, communicator includes only ranks 0 and 8:
 

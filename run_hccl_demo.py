@@ -60,7 +60,7 @@ class DemoTest:
         self.mpi_args                 = []
         self.ERROR                    = 1
         self.SUCCESS                  = 0
-        self.csv_path                 = ""
+        self.result_csv               = ""
         self.log_prefix               = "HCCL_demo_log_"
         self.demo_exe                 = "./hccl_demo"
         self.test_list                = ['broadcast',
@@ -91,7 +91,7 @@ class DemoTest:
                                          '--mca btl_tcp_if_include']
         self.ignore_mpi_errors_list   = ['--mca btl_openib_warn_no_device_params_found 0']
         self.custom_comm = ""
-        self.data_csv = False
+        self.data_csv = ""
 
         self.data_type_to_struct_format = {'float' : 'f', 'bfloat16' : 'e'}
 
@@ -141,13 +141,13 @@ class DemoTest:
         test_group.add_argument("--scaleout_bw", type=str, help="Expected scaleout BW in units of G,M,K,B or no unit. Default is Bytes/sec")
         # Logging flags
         log_group = parser.add_argument_group('Logging Options')
-        log_group.add_argument("--csv_path", type=str,
+        log_group.add_argument("--result_csv", type=str, default="",
                             help="Path to a file for results output (optional).")
         log_group.add_argument("--ignore_mpi_errors", "-ignore_mpi_errors", action="store_true",
                             help="Ignore generic MPI errors.")
         log_group.add_argument("--no_color", "-no_color", action="store_true",
                             help="Disable colored output in terminal.")
-        log_group.add_argument("--data_csv", "-data_csv", action="store_true",
+        log_group.add_argument("--data_csv", "-data_csv", type=str, default="",
                             help="Creates 2 csv file for each rank, one for data input and second for data output.")
 
         self.create_logger()
@@ -279,8 +279,8 @@ class DemoTest:
                 cmd_args.append("HCCL_SIZE_RANGE_INC=" + str(self.size_range_inc))
             else:
                 cmd_args.append("HCCL_DEMO_TEST_SIZE=" + str(self.size))
-
-            cmd_args.append("HCCL_DEMO_DATA_CSV="      + str(self.data_csv))
+            if self.data_csv != "":
+                cmd_args.append("HCCL_DEMO_DATA_CSV="      + str(self.data_csv))
 
             if (self.no_correctness == True):
                 cmd_args.append("HCCL_DEMO_CHECK_CORRECTNESS=0")
@@ -295,7 +295,8 @@ class DemoTest:
             if self.ranks_list:
                 cmd_args.append("HCCL_RANKS_LIST="        + str(self.ranks_list))
             cmd_args.append("HCCL_DEMO_TEST_ROOT="     + str(self.test_root))
-            cmd_args.append("HCCL_DEMO_CSV_PATH="      + str(self.csv_path))
+            if self.result_csv != "":
+                cmd_args.append("HCCL_DEMO_RESULT_CSV="      + str(self.result_csv))
             cmd_args.append("HCCL_DEMO_MPI_REQUESTED=" + str(int(self.mpi)))
             cmd_args.append("MPI_ENABLED="             + str(int(self.mpi)))
             cmd_args.append("NUMA_MAPPING_DIR="        + str(numa_output_path))
@@ -333,7 +334,7 @@ class DemoTest:
 
     def set_optional_env(self):
         '''The following method is used in order to append optional environment
-           variables to the command line, in case any were requsted by the user.'''
+           variables to the command line, in case any were requested by the user.'''
         try:
             optional_args = []
             for env in self.optional_env_list:
@@ -435,7 +436,7 @@ class DemoTest:
 
     def make_demo(self, is_clean=False):
         '''The following method is used in order to build the HCCL demo.
-           The build command will automatically adjust iself accordingly
+           The build command will automatically adjust itself accordingly
            to the following:
            1) Environment type (development / release)
            2) Running mode (MPI / Pure)'''
@@ -575,7 +576,7 @@ class DemoTest:
             min_supported_size = self.nranks * data_type_size if (self.test == 'reduce_scatter' or self.test == 'all2all') else data_type_size
             min_size = self.size_range[0] if self.size_range else self.size
             if (min_supported_size > int(min_size)):
-                self.exit_demo(f'[validate_size] Requested size: {min_size}B was less than supported minimun size: {min_supported_size}B')
+                self.exit_demo(f'[validate_size] Requested size: {min_size}B was less than supported minimum size: {min_supported_size}B')
             if self.size_range and int(self.size_range[0]) > int(self.size_range[1]):
                 self.exit_demo(f'[validate_size] Requested size_range min size: {self.size_range[0]}B should be less than size_range max size: {self.size_range[1]}B')
         except Exception as e:
@@ -612,9 +613,9 @@ class DemoTest:
             ranks_per_node = self.run_command("lspci | grep -c -E '(Habana|1da3)'")
             if (ranks_per_node[0] != '0'):
                 self.ranks_per_node = int(ranks_per_node[0])
-                self.log_info(f'The user did not set --ranks_per_node. lscpi command found {self.ranks_per_node} ranks per node.')
+                self.log_info(f'The user did not set --ranks_per_node. lspci command found {self.ranks_per_node} ranks per node.')
             else:
-                self.exit_demo(f'[get_ranks_per_node] The user did not set --ranks_per_node. lscpi command did not find number of ranks. Please provide --ranks_per_node.')
+                self.exit_demo(f'[get_ranks_per_node] The user did not set --ranks_per_node. lspci command did not find number of ranks. Please provide --ranks_per_node.')
         except Exception as e:
             self.log_error(f'[get_ranks_per_node] {e}' ,exception=True)
             raise Exception(e)
