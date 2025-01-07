@@ -732,7 +732,7 @@ static void printReport(const EnvData& envData, const std::vector<ReportEntry>& 
     constexpr size_t columnWidth = 14;
 
     const static std::vector<std::string> header = {"size", "count", "type", "redop", "time", "algoBW", "nw_bw"};
-    const static std::vector<std::string> units  = {"(B)", "(elements)", "", "", "(us)", "(GB/s)", "(GB/s)"};
+    const static std::vector<std::string> units  = {"(B)", "(elements)", "", "", "(ms)", "(GB/s)", "(GB/s)"};
 
     std::stringstream ss;
     const std::string summary = "[SUMMARY REPORT]";

@@ -258,7 +258,7 @@ Output example:
     (src!=dst, collective=all_reduce, iterations=1)
 
     size          count         type          redop         time          algo_bw       nw_bw
-    (B)           (elements)                                (us)          (GB/s)        (GB/s)
+    (B)           (elements)                                (ms)          (GB/s)        (GB/s)
     32            8             float         sum           <time>        <bandwidth>   <bandwidth>
     64            16            float         sum           <time>        <bandwidth>   <bandwidth>
     128           32            float         sum           <time>        <bandwidth>   <bandwidth>
