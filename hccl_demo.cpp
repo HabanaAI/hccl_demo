@@ -418,7 +418,7 @@ generateInputs(const EnvData& envData, const DeviceResources& resources, const u
     // Copy from inputHostDataPtr to inputDevPtr (to be used in benchmark)
     CHECK_SYNAPSE_STATUS(synHostMap(resources.deviceHandle, buffers.inputSize, inputHostDataPtr));
     CHECK_SYNAPSE_STATUS(synMemCopyAsync(resources.hostToDeviceStream,
-                                         (uint64_t) inputHostDataPtr,
+                                         (uint64_t)inputHostDataPtr,
                                          buffers.inputSize,
                                          buffers.inputDevPtrs[0],
                                          HOST_TO_DRAM));
@@ -473,7 +473,7 @@ static bool checkCorrectness(const EnvData&         envData,
     CHECK_SYNAPSE_STATUS(synMemCopyAsync(resources.deviceToHostStream,
                                          buffers.correctnessDevPtr,
                                          buffers.outputSize,
-                                         (uint64_t) outputHostDataPtr,
+                                         (uint64_t)outputHostDataPtr,
                                          DRAM_TO_HOST));
     CHECK_SYNAPSE_STATUS(synStreamSynchronize(resources.deviceToHostStream));
     CHECK_SYNAPSE_STATUS(synHostUnmap(resources.deviceHandle, outputHostDataPtr));
@@ -488,7 +488,7 @@ static bool checkCorrectness(const EnvData&         envData,
             }
             else
             {
-                if (std::abs((float) outputHostData[i] - expectedOutputs[i]) != 0)
+                if (std::abs((float)outputHostData[i] - expectedOutputs[i]) != 0)
                 {
                     isOK = false;
                 }
@@ -539,7 +539,7 @@ static bool checkCorrectness(const EnvData&         envData,
 static void
 describeStat(const EnvData& envData, const Buffers& buffers, const Stats& stats, std::vector<ReportEntry>& reportVec)
 {
-    auto algoBW = (double) buffers.inputSize / stats.rankDurationInSec;
+    auto algoBW = (double)buffers.inputSize / stats.rankDurationInSec;
     auto nwBW   = algoBW * stats.factor;
 
     if (envData.sizeMax > envData.sizeMin)
@@ -547,7 +547,7 @@ describeStat(const EnvData& envData, const Buffers& buffers, const Stats& stats,
         log() << "Processing data_size " << envData.rank << " is done with " << envData.testType << " test."
               << std::endl;
         ReportEntry report_entry = {buffers.inputSize,
-                                    (uint64_t) (buffers.inputSize / getDataTypeSize(envData)),
+                                    (uint64_t)(buffers.inputSize / getDataTypeSize(envData)),
                                     stats.rankDurationInSec,
                                     algoBW,
                                     nwBW};
@@ -583,11 +583,17 @@ describeStat(const EnvData& envData, const Buffers& buffers, const Stats& stats,
     }
 }
 
-using CollectiveWrapper = std::function<void(
-    const EnvData& envData, const DeviceResources& resources, const void* sendbuff, void* recvbuff, size_t recvcount)>;
+using CollectiveWrapper = std::function<void(const EnvData&         envData,
+                                             const DeviceResources& resources,
+                                             const void*            sendbuff,
+                                             void*                  recvbuff,
+                                             size_t                 recvcount)>;
 
-static void hcclBroadcastWrapper(
-    const EnvData& envData, const DeviceResources& resources, const void* sendbuff, void* recvbuff, size_t recvcount)
+static void hcclBroadcastWrapper(const EnvData&         envData,
+                                 const DeviceResources& resources,
+                                 const void*            sendbuff,
+                                 void*                  recvbuff,
+                                 size_t                 recvcount)
 {
     CHECK_HCCL_STATUS(hcclBroadcast(sendbuff,
                                     recvbuff,
@@ -598,8 +604,11 @@ static void hcclBroadcastWrapper(
                                     resources.collectiveStream));
 }
 
-static void hcclAllReduceWrapper(
-    const EnvData& envData, const DeviceResources& resources, const void* sendbuff, void* recvbuff, size_t recvcount)
+static void hcclAllReduceWrapper(const EnvData&         envData,
+                                 const DeviceResources& resources,
+                                 const void*            sendbuff,
+                                 void*                  recvbuff,
+                                 size_t                 recvcount)
 {
     CHECK_HCCL_STATUS(hcclAllReduce(sendbuff,
                                     recvbuff,
@@ -610,8 +619,11 @@ static void hcclAllReduceWrapper(
                                     resources.collectiveStream));
 }
 
-static void hcclReduceScatterWrapper(
-    const EnvData& envData, const DeviceResources& resources, const void* sendbuff, void* recvbuff, size_t recvcount)
+static void hcclReduceScatterWrapper(const EnvData&         envData,
+                                     const DeviceResources& resources,
+                                     const void*            sendbuff,
+                                     void*                  recvbuff,
+                                     size_t                 recvcount)
 {
     CHECK_HCCL_STATUS(hcclReduceScatter(sendbuff,
                                         recvbuff,
@@ -622,22 +634,31 @@ static void hcclReduceScatterWrapper(
                                         resources.collectiveStream));
 }
 
-static void hcclAllGatherWrapper(
-    const EnvData& envData, const DeviceResources& resources, const void* sendbuff, void* recvbuff, size_t recvcount)
+static void hcclAllGatherWrapper(const EnvData&         envData,
+                                 const DeviceResources& resources,
+                                 const void*            sendbuff,
+                                 void*                  recvbuff,
+                                 size_t                 recvcount)
 {
     CHECK_HCCL_STATUS(
         hcclAllGather(sendbuff, recvbuff, recvcount, getDataType(envData), resources.comm, resources.collectiveStream));
 }
 
-static void hcclAlltoAllWrapper(
-    const EnvData& envData, const DeviceResources& resources, const void* sendbuff, void* recvbuff, size_t recvcount)
+static void hcclAlltoAllWrapper(const EnvData&         envData,
+                                const DeviceResources& resources,
+                                const void*            sendbuff,
+                                void*                  recvbuff,
+                                size_t                 recvcount)
 {
     CHECK_HCCL_STATUS(
         hcclAlltoAll(sendbuff, recvbuff, recvcount, getDataType(envData), resources.comm, resources.collectiveStream));
 }
 
-static void hcclReduceWrapper(
-    const EnvData& envData, const DeviceResources& resources, const void* sendbuff, void* recvbuff, size_t recvcount)
+static void hcclReduceWrapper(const EnvData&         envData,
+                              const DeviceResources& resources,
+                              const void*            sendbuff,
+                              void*                  recvbuff,
+                              size_t                 recvcount)
 {
     CHECK_HCCL_STATUS(hcclReduce(sendbuff,
                                  recvbuff,
@@ -649,8 +670,11 @@ static void hcclReduceWrapper(
                                  resources.collectiveStream));
 }
 
-static void collectiveTestDriver(
-    const EnvData& envData, const DeviceResources& resources, const Buffers& buffers, const uint64_t size, Stats& stats)
+static void collectiveTestDriver(const EnvData&         envData,
+                                 const DeviceResources& resources,
+                                 const Buffers&         buffers,
+                                 const uint64_t         size,
+                                 Stats&                 stats)
 {
     CollectiveWrapper collective;
 
@@ -663,25 +687,25 @@ static void collectiveTestDriver(
     else if (envData.testType == "all_reduce")
     {
         stats.statName = "hcclAllReduce";
-        stats.factor   = ((double) (2 * (envData.nranks - 1))) / ((double) envData.nranks);
+        stats.factor   = ((double)(2 * (envData.nranks - 1))) / ((double)envData.nranks);
         collective     = hcclAllReduceWrapper;
     }
     else if (envData.testType == "reduce_scatter")
     {
         stats.statName = "hcclReduceScatter";
-        stats.factor   = ((double) (envData.nranks - 1)) / ((double) envData.nranks);
+        stats.factor   = ((double)(envData.nranks - 1)) / ((double)envData.nranks);
         collective     = hcclReduceScatterWrapper;
     }
     else if (envData.testType == "all_gather")
     {
         stats.statName = "hcclAllGather";
-        stats.factor   = ((double) (envData.nranks - 1));
+        stats.factor   = ((double)(envData.nranks - 1));
         collective     = hcclAllGatherWrapper;
     }
     else if (envData.testType == "all2all")
     {
         stats.statName = "hcclAlltoAll";
-        stats.factor   = ((double) (envData.nranks - 1)) / ((double) envData.nranks);
+        stats.factor   = ((double)(envData.nranks - 1)) / ((double)envData.nranks);
         collective     = hcclAlltoAllWrapper;
     }
     else if (envData.testType == "reduce")
@@ -704,15 +728,15 @@ static void collectiveTestDriver(
             uint64_t index = iter % buffers.inputDevPtrs.size();
             collective(envData,
                        resources,
-                       (const void*) buffers.inputDevPtrs[index],
-                       (void*) buffers.outputDevPtrs[index],
+                       (const void*)buffers.inputDevPtrs[index],
+                       (void*)buffers.outputDevPtrs[index],
                        buffers.inputSize / getDataTypeSize(envData));
         },
         [&]() {
             collective(envData,
                        resources,
-                       (const void*) buffers.inputDevPtrs[0],
-                       (void*) buffers.correctnessDevPtr,
+                       (const void*)buffers.inputDevPtrs[0],
+                       (void*)buffers.correctnessDevPtr,
                        buffers.inputSize / getDataTypeSize(envData));
         });
 
@@ -803,7 +827,7 @@ static void runTest(EnvData& envData, const DeviceResources& resources)
             scaleValidationTestDriver(envData, resources, buffers, static_cast<uint64_t>(size));
 #else
             throw std::runtime_error {"MPI must be enabled for scale validation test"};
-#endif  //MPI_ENABLED
+#endif  // MPI_ENABLED
         }
         else
         {

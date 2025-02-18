@@ -240,17 +240,17 @@ int setupAffinity(int device_module_id)
 {
     if (!get_disable_proc_affinity_env())
     {
-        if((uint32_t)device_module_id == INVALID_MODULE_ID)
+        if ((uint32_t)device_module_id == INVALID_MODULE_ID)
         {
-                cout << "Failed to set affinty, unknown module ID" << endl;
-                return get_enforce_proc_affinity_env();
+            cout << "Failed to set affinity, unknown module ID" << endl;
+            return get_enforce_proc_affinity_env();
         }
         else if (get_num_sockets() && get_num_cores_per_socket() && get_num_ht())
         {
             cout << "Setting custom affinity" << endl;
             if (setCustomAffinity(device_module_id, get_num_sockets(), get_num_cores_per_socket(), get_num_ht()) != 0)
             {
-                cout << "Failed to set custom affinty" << endl;
+                cout << "Failed to set custom affinity" << endl;
                 return get_enforce_proc_affinity_env();
             }
         }
@@ -259,7 +259,7 @@ int setupAffinity(int device_module_id)
             cout << "Setting best effort affinity" << endl;
             if (setBestEffortAffinity(device_module_id) != 0)
             {
-                cout << "Failed to set best effort affinty" << endl;
+                cout << "Failed to set best effort affinity" << endl;
                 return get_enforce_proc_affinity_env();
             }
         }

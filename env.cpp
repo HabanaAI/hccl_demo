@@ -39,8 +39,7 @@ static uint64_t getEnvOrDefaultValue(const char* envName, uint64_t defaultValue)
 
 static void checkRankValue(HCL_Rank rank, size_t nranks)
 {
-    bool is_valid = rank >= 0 && rank < nranks;
-    if (!is_valid)
+    if (rank >= nranks)
     {
         throw std::runtime_error {"Invalid rank number " + std::to_string(rank) + ", ranks can be in range [0," +
                                   std::to_string(nranks - 1) + "] in custom_comm"};

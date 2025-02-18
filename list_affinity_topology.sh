@@ -56,6 +56,17 @@ create_temp_files()
    echo > $file_cpus
 }
 
+# Function to expand ranges of core isolation
+expand_ranges() {
+    echo "$1" | tr ',' '\n' | while read range; do
+        if [[ $range == *-* ]]; then
+            seq $(echo $range | awk -F'-' '{print $1, $2}')
+        else
+            echo "$range"
+        fi
+    done
+}
+
 create_configuration_table()
 {
    # Save the entire hl-smi output to file
@@ -82,7 +93,7 @@ create_configuration_table()
       for i in `hl-smi -L|grep "Bus Id"|awk '{print $4}'`; do
           affinity_print "PCIE:"$i", NUMA:"`cat /sys/bus/pci/devices/$i/numa_node`;
        done
-       affinity_print "Numa mapping is not set properly, most likley you are using an unsupported VM, aborting affinity setting"
+       affinity_print "Numa mapping is not set properly, most likely you are using an unsupported VM, aborting affinity setting"
        exit 1
       fi
    done
@@ -110,7 +121,10 @@ mask_cpu()
 
 create_thread_list()
 {
+   no_of_numa_nodes=`lscpu|grep "NUMA node(s):"|awk '{print $3}'`
    no_of_gaudis=`cat $file_configuration_table|wc -l`
+   no_of_used_numa=`cat $file_pcie_numa | uniq | wc -l`
+
    for module_id in $(seq 0 $(($no_of_gaudis-1))); do
       # Grab one PCIE id at a time (busID)
       pcie_bus_id=`cat $file_configuration_table | awk '{print $2}' | sed -n $(($module_id+1))p`
@@ -123,43 +137,49 @@ create_thread_list()
 
       # Get the list of threads for the main processes
       if [ $numa_node -ge 0 ]; then
-         cpulist=`lscpu --parse | grep ",$numa_node,,"`
+         # Read isolated cores and expand them
+         isolated_cores=$(expand_ranges "$(cat /sys/devices/system/cpu/isolated)")
+
+         # Get physical cores (excluding hyper threaded ones)
+         physical_cores=$(lscpu --parse=CORE,CPU,SOCKET,NODE | grep -v '^#' | awk -F',' '!seen[$1]++ {print $2}')
+
+         cpulist_vector=`lscpu --parse | grep ",$numa_node,,"|awk -F"," '{print $1}'`
          # check if sub numa clustering is enabled
          if [ $no_of_numanode -gt $no_of_sockets ]; then
                  numa_node=$((numa_node/numa_per_socket))
-                 cpulist=`lscpu -e=CPU,SOCKET| grep -v SOCKET| awk ' { printf("%d,%d,%d,%d,,\n",$1,$1,$2,$2); }'| grep ",$numa_node,,"`
+                 cpulist_vector=`lscpu -e=CPU,SOCKET| grep -v SOCKET| awk ' { printf("%d,%d,%d,%d,,\n",$1,$1,$2,$2); }'| grep ",$numa_node,,"`
          fi
-         for cpuid in $cpulist; do
-             grep "gaudi2" $file_hl_smi > /dev/null
-             if [ $? != 0 ]; then
-                 # Not G2
-                 cpu=$(echo $cpuid | cut -d "," -f 1)
-                 echo $cpu >> $temp_dir/.habana_moduleID$module_id
-                 echo $cpu >> $temp_dir/.module
-                 continue
-             fi
 
-             arr=$(echo $cpuid | cut -d "," -f 1-2 | tr , " ")
-             arr=($arr)
-             sibling=$(cat /sys/devices/system/cpu/cpu${arr[0]}/topology/thread_siblings_list | tr , " " | tr "-" " " | cut -d " " -f 1)
-             if [ ${arr[0]} != $sibling ]; then
-                 # Each processor can have more than one thread (called 'hyperthread').
-                 # We are only interested in using one of these, since using more than one
-                 # (if one rank gets one hyperthread of a processor and another rank gets the other hyperthread)
-                 # will result in bad throughput.
-                 continue
-             fi
-             cpuid=${arr[0]}
+         # Filter NUMA node cores to keep only physical cores that are isolated
+         filtered_vector=$(for core in $cpulist_vector; do
+            # Check if isolated_cores is empty
+            if [[ -z "$isolated_cores" ]]; then
+               # If isolated_cores is empty, consider all cores as isolated
+               if echo "$physical_cores" | grep -q "^$core$"; then
+                     echo "$core"
+               fi
+            else
+               # Proceed with normal filtering if isolated_cores is not empty
+               if echo "$isolated_cores" | grep -q "^$core$" && echo "$physical_cores" | grep -q "^$core$"; then
+                     echo "$core"
+               fi
+            fi
+         done)
 
-             cat $file_cpus | grep -w "${cpuid}" > /dev/null 2>&1
-             if [ $? == 0 ]; then
-                 # Current cpuid was discovered as a masked processor, previously used by the interrupt logic.
-                 # This cpuid should not be used.
-                 continue
-             fi
-             echo $cpuid >> $temp_dir/.habana_moduleID$module_id
-             echo $cpuid >> $temp_dir/.module
-         done
+         # Convert filtered_vector into an array
+         filtered_array=($(echo "$filtered_vector"))
+
+         # Calculate the key_factor
+         num_cores=${#filtered_array[@]}
+         key_factor=$((num_cores / ((no_of_gaudis)/no_of_numa_nodes)))
+         start_index=$(( ((module_id % ((no_of_gaudis)/no_of_numa_nodes)) - 1) * key_factor ))
+         end_index=$(( start_index + key_factor - 1 ))
+
+         # Extract cores for process_x
+         process_cores=("${filtered_array[@]:$start_index:$key_factor}")
+         echo ${process_cores[@]} >> $temp_dir/.habana_moduleID$module_id
+         echo ${process_cores[@]} >> $temp_dir/.module
+
          if [ -f $temp_dir/.habana_moduleID$module_id ]; then
              cat $temp_dir/.habana_moduleID$module_id | tr '\n' ' ' > $NUMA_MAPPING_DIR/.habana_moduleID$module_id
          fi

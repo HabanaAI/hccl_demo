@@ -26,7 +26,7 @@ static std::vector<RanksPairSendRecv> parseRanksList(const std::string& ranksLis
     while (std::getline(ss, token, ','))
     {
         const HCL_Rank rankNum = std::stoi(token);
-        if ((rankNum >= 0) && (rankNum <= maxRankNumber))
+        if (rankNum <= maxRankNumber)
         {
             tempRanksVector.push_back(rankNum);
         }
@@ -95,7 +95,7 @@ static hcclResult_t sendRecvRanksTest(uint64_t                     iter,
     uint64_t recvBufferIndex = (recvRanks.size() * iter) % recvbuffs.size();
     for (const HCL_Rank recvRank : recvRanks)
     {
-        CHECK_HCCL_STATUS(hcclRecv((void*) recvbuffs[recvBufferIndex],
+        CHECK_HCCL_STATUS(hcclRecv((void*)recvbuffs[recvBufferIndex],
                                    count,
                                    getDataType(envData),
                                    recvRank,
@@ -109,8 +109,11 @@ static hcclResult_t sendRecvRanksTest(uint64_t                     iter,
     return hcclSuccess;
 }
 
-void sendRecvTestDefaultDriver(
-    const EnvData& envData, const DeviceResources& resources, Buffers& buffers, const uint64_t size, Stats& stats)
+void sendRecvTestDefaultDriver(const EnvData&         envData,
+                               const DeviceResources& resources,
+                               Buffers&               buffers,
+                               const uint64_t         size,
+                               Stats&                 stats)
 {
     // The flow of the test is as follows:
     // For single box, exchange buffer with adjacent rank. If odd number of ranks then last rank does self send/recv.
@@ -133,9 +136,8 @@ void sendRecvTestDefaultDriver(
     const HCL_Rank myRank   = envData.rank;
     const size_t   myBoxNum = myRank / scaleupGroupSize;
 
-    HCL_Rank sendToRank   = HCL_INVALID_RANK;
-    HCL_Rank recvFromRank = HCL_INVALID_RANK;
-
+    HCL_Rank sendToRank;
+    HCL_Rank recvFromRank;
     if (numOfBoxes > 1)
     // scaleout
     {
@@ -166,8 +168,8 @@ void sendRecvTestDefaultDriver(
                                            recvFromRank,
                                            sendToRank,
                                            buffers.inputSize / getDataTypeSize(envData),
-                                           (const void*) buffers.inputDevPtrs[index],
-                                           (void*) buffers.outputDevPtrs[index]));
+                                           (const void*)buffers.inputDevPtrs[index],
+                                           (void*)buffers.outputDevPtrs[index]));
         },
         [&]() {
             CHECK_HCCL_STATUS(sendRecvTest(envData,
@@ -175,8 +177,8 @@ void sendRecvTestDefaultDriver(
                                            recvFromRank,
                                            sendToRank,
                                            buffers.inputSize / getDataTypeSize(envData),
-                                           (const void*) buffers.inputDevPtrs[0],
-                                           (void*) buffers.correctnessDevPtr));
+                                           (const void*)buffers.inputDevPtrs[0],
+                                           (void*)buffers.correctnessDevPtr));
         });
 
     // Calculate expected results for correctness check
@@ -191,8 +193,11 @@ void sendRecvTestDefaultDriver(
     stats.isDescribing = true;
 }
 
-void sendRecvRanksTestDriver(
-    const EnvData& envData, const DeviceResources& resources, Buffers& buffers, const uint64_t size, Stats& stats)
+void sendRecvRanksTestDriver(const EnvData&         envData,
+                             const DeviceResources& resources,
+                             Buffers&               buffers,
+                             const uint64_t         size,
+                             Stats&                 stats)
 {
     // This test performs send_recv from/to specific ranks given as a list
     // A single rank can send to one or many ranks and can also recv from one or many ranks.
@@ -259,7 +264,7 @@ void sendRecvRanksTestDriver(
                                                 recvFromRanks,
                                                 sendToRanks,
                                                 size / getDataTypeSize(envData),
-                                                (const void*) buffers.inputDevPtrs[index],
+                                                (const void*)buffers.inputDevPtrs[index],
                                                 buffers.outputDevPtrs));
         },
         [&]() -> void {
@@ -269,7 +274,7 @@ void sendRecvRanksTestDriver(
                                                 recvFromRanks,
                                                 sendToRanks,
                                                 size / getDataTypeSize(envData),
-                                                (const void*) buffers.inputDevPtrs[0],
+                                                (const void*)buffers.inputDevPtrs[0],
                                                 buffers.outputDevPtrs));
         });
 
@@ -281,8 +286,11 @@ void sendRecvRanksTestDriver(
     }
 }
 
-void sendRecvTestDriver(
-    EnvData& envData, const DeviceResources& resources, Buffers& buffers, const uint64_t size, Stats& stats)
+void sendRecvTestDriver(EnvData&               envData,
+                        const DeviceResources& resources,
+                        Buffers&               buffers,
+                        const uint64_t         size,
+                        Stats&                 stats)
 {
     // The flow of the test is as follows:
     // For single box, exchange buffer with adjacent rank. If odd number of ranks then last rank does self send/recv.

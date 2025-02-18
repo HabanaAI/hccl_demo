@@ -40,7 +40,7 @@
             throw std::runtime_error {"In function " + std::string {__FUNCTION__} +                                    \
                                       "(): " #x " failed with code: " + std::to_string(_res)};                         \
     }
-#endif  //MPI_ENABLED
+#endif  // MPI_ENABLED
 
 // Error handling
 #define CHECK_HCCL_STATUS(x)                                                                                           \
@@ -149,13 +149,19 @@ inline bool isBfloat16(const EnvData& envData)
 
 inline uint16_t floatToBf16(const float f)
 {
-    return ((*(const uint32_t*) &f) >> 16) & 0xffff;
+    union
+    {
+        float    f;
+        uint32_t u;
+    } converter;
+    converter.f = f;
+    return (converter.u >> 16) & 0xffff;
 }
 
 inline float bf16ToFloat(const uint16_t a)
 {
     float          val_fp32;
-    const uint32_t val_32b = ((uint32_t) a) << 16;
+    const uint32_t val_32b = ((uint32_t)a) << 16;
     static_assert(sizeof(float) == sizeof(val_32b), "`float` size is incompatible!");
     std::memcpy(&val_fp32, &val_32b, sizeof(float));
     return val_fp32;
@@ -164,7 +170,7 @@ inline float bf16ToFloat(const uint16_t a)
 inline float bf16AccuracyCoefficient(size_t numberOfRanks)
 {
     numberOfRanks = (numberOfRanks > 8) ? 8 : numberOfRanks;
-    return (numberOfRanks > 1) ? (float) numberOfRanks / 256.0 : 0.0;  // For 1 rank, tolerance should be 0
+    return (numberOfRanks > 1) ? (float)numberOfRanks / 256.0 : 0.0;  // For 1 rank, tolerance should be 0
 }
 
 inline bool isRoot(const EnvData& envData)
@@ -277,8 +283,11 @@ double benchmark(const EnvData&                       envData,
 EnvData getenvData();
 
 // send-recv interface
-void sendRecvTestDriver(
-    EnvData& envData, const DeviceResources& resources, Buffers& buffers, const uint64_t size, Stats& stats);
+void sendRecvTestDriver(EnvData&               envData,
+                        const DeviceResources& resources,
+                        Buffers&               buffers,
+                        const uint64_t         size,
+                        Stats&                 stats);
 
 // scale validation interface
 #ifdef MPI_ENABLED
