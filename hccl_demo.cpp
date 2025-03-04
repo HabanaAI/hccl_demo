@@ -615,8 +615,7 @@ describeStat(const EnvData& envData, const Buffers& buffers, const Stats& stats,
 
     if (envData.sizeMax > envData.sizeMin)
     {
-        log() << "Processing data_size " << envData.rank << " is done with " << envData.testType << " test."
-              << std::endl;
+        log() << "Processing data_size " << buffers.inputSize << std::endl;
         ReportEntry report_entry = {buffers.inputSize,
                                     (uint64_t)(buffers.inputSize / getDataTypeSize(envData)),
                                     stats.rankDurationInSec,
