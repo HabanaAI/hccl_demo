@@ -6,12 +6,12 @@ class Affinity:
     def __init__(self, mpi, user_cmd):
         self.user_cmd    = user_cmd
         self.mpi         = mpi
-        self.file_name   = 'list_affinity_topology.sh'
+        self.file_name   = 'common_list_affinity_topology.sh'
         self.default_dir = '/tmp/affinity_topology_output'
-        self.exe         = f'bash {self.file_name}'
         self.SUCCESS     = 0
         self.ERROR       = 1
         self.return_code = self.SUCCESS
+        self.exe         = None
 
     def create_affinity_files(self):
         try:
@@ -33,13 +33,18 @@ class Affinity:
 
             # Make sure affinity script exists
             if not os.path.isfile(self.file_name):
-                self.print_affinity(f'Could not find {self.file_name}')
-                self.calculate_return_code(self.ERROR)
-                return self.return_code
-
+                # trying somewhere else
+                self.file_name   = '../gc_tools/hcl/list_affinity_topology_bare_metal_no_irq.sh'
+                if not os.path.isfile(self.file_name):
+                    self.print_affinity(f'Could not find {self.file_name}')
+                    self.calculate_return_code(self.ERROR)
+            self.exe = f'bash {self.file_name}'
             # Set the output directory for the moduleID <-> numa mapping
             output_path = os.getenv('NUMA_MAPPING_DIR', self.default_dir)
-
+            # Make sure output directory exists if not create it
+            if not os.path.exists(output_path):
+                self.print_affinity('creating output affinity folder')
+                os.makedirs(output_path)
             # Determine correct command line (MPI/pure mode)
             if self.mpi:
                 self.print_affinity('Running in MPI mode.')

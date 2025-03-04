@@ -14,6 +14,77 @@
 #include <stdexcept>  // for std::runtime_error
 #include <unistd.h>   // for sleep
 
+#define RST "\033[0m"          // reset (white)
+#define GRN "\033[32m"         // Green
+#define RED "\033[1m\033[31m"  // Bold Red
+
+enum class AffinityEnum : uint32_t
+{
+    PHYSICAL  = 0x1,
+    NUMA      = 0x10,
+    ISOLATION = 0x100
+};
+
+std::stringstream get_affinity_message(int value, AffinityEnum level, const std::string& feature)
+{
+    std::stringstream ss;
+    const bool        is_done = value & static_cast<int>(level);
+    std::stringstream status;
+    status << (is_done ? "enabled" : "not enabled");
+
+    std::stringstream color;
+    color << (is_done ? GRN : RED);
+
+    ss << color.str() << feature << " - " << status.str() << RST << "\n";
+    return ss;
+}
+
+// Function to get and evaluate the affinity level
+std::stringstream get_affinity_level()
+{
+    auto              numa_mapping_dir = "";
+    const char* const env_value        = getenv("NUMA_MAPPING_DIR");
+    numa_mapping_dir                   = (env_value != nullptr) ? env_value : numa_mapping_dir;
+
+    std::stringstream file_final_class_output;
+    file_final_class_output << numa_mapping_dir << "/.habana_module_affinity_classification";
+    std::ifstream fin(file_final_class_output.str());
+
+    if (!fin.is_open())
+    {
+        std::cout << RED << "Error: Unable to open file " << file_final_class_output.str() << RST << std::endl;
+        std::stringstream ss;
+        ss << "No core affinity optimization level could be determined.";
+        return ss;
+    }
+
+    std::string first_line;
+    getline(fin, first_line);  // Read the first line of the file
+    fin.close();
+
+    // Convert the first line to an integer (assuming it's a hexadecimal value)
+    int affinity_value = 0;
+    try
+    {
+        affinity_value = stoi(first_line, nullptr, 16);  // Parse as hex
+    }
+    catch (const std::invalid_argument& e)
+    {
+        std::cout << RED << "Error: Invalid affinity value found in the file." << RST << std::endl;
+        std::stringstream ss;
+        ss << "Failed to interpret core affinity optimization level.";
+        return ss;
+    }
+
+    // Generate the result messages
+    std::stringstream result;
+    result << get_affinity_message(affinity_value, AffinityEnum::PHYSICAL, "Physical core ").str();
+    result << get_affinity_message(affinity_value, AffinityEnum::NUMA, "NUMA          ").str();
+    result << get_affinity_message(affinity_value, AffinityEnum::ISOLATION, "Core isolation").str();
+
+    return result;
+}
+
 // Constants
 static constexpr size_t MAX_PRINTED_BUFFER_ELEMENTS = 4;
 
@@ -569,6 +640,7 @@ describeStat(const EnvData& envData, const Buffers& buffers, const Stats& stats,
         log() << "[BENCHMARK]     NW Bandwidth   : " << formatBW(nwBW) << '\n';
         log() << "[BENCHMARK]     Algo Bandwidth : " << formatBW(algoBW);
         log() << '\n' << getPrintDelimiter(delimiterSize, '#') << '\n';
+        log() << "Core affinity optimization result: " << '\n' << get_affinity_level().str() << std::endl;
     }
 
     // Write results to csv file
@@ -797,6 +869,7 @@ static void printReport(const EnvData& envData, const std::vector<ReportEntry>& 
            << std::setw(columnWidth) << std::fixed << std::setprecision(6) << entry.avgBW / 1e9 << std::endl;
     }
     log() << ss.str();
+    log() << "Core affinity optimization result: " << '\n' << get_affinity_level().str() << std::endl;
 }
 
 template<class T>
