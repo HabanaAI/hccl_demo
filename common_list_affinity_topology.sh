@@ -1,5 +1,7 @@
 #!/bin/bash
 
+
+
 #Description
 #This script outputs a file for each moduleID.
 #These files contain the Hthread_sequence on which the process is bound too (this is a restriction and not a reservation).
@@ -10,6 +12,14 @@
 #Lastly we get the Hthread_sequence that correspond to that numa_node from lscpu so now we have
 #(ModuleID, pcie_bus_id,  numa_node, Hthread_sequence )
 #The Hthread_sequence is then used to bind the process to the specific threads on the numa closest to the PCIE bus.
+
+declare -A AFFINITY_ENUM=(
+    [PHYSICAL]=0x1
+    [NUMAS]=0x10
+    [ISOLATION]=0x100
+)
+export AFFINITY_LEVEL
+AFFINITY_LEVEL=0
 
 affinity_print()
 {
@@ -47,6 +57,7 @@ create_temp_files()
    file_hl_smi=$temp_dir/hl_smi.txt
    file_configuration_table=$temp_dir/configuration_table.txt
    file_final_output=$NUMA_MAPPING_DIR/.habana_module_topo
+   file_final_class_output=$NUMA_MAPPING_DIR/.habana_module_affinity_classification
 }
 
 create_configuartion_table()
@@ -82,6 +93,16 @@ create_configuartion_table()
    paste $file_module_id $file_pcie_bus_id $file_pcie_numa | awk ' {print $4,$8,$9}' | sort -k1 > $file_configuration_table
 }
 
+# Function to expand ranges
+expand_ranges() {
+    echo "$1" | tr ',' '\n' | while read range; do
+        if [[ $range == *-* ]]; then
+            seq $(echo $range | awk -F'-' '{print $1, $2}')
+        else
+            echo "$range"
+        fi
+    done
+}
 
 create_thread_list()
 {
@@ -89,6 +110,9 @@ create_thread_list()
    no_of_gaudis=`cat $file_configuration_table|wc -l`
    no_of_used_numa=`cat $file_pcie_numa | uniq | wc -l`
 
+   if [ $no_of_numa_nodes -ge 1 ]; then
+      AFFINITY_LEVEL=$((AFFINITY_LEVEL | ENUM[NUMAS]))
+   fi
 
    for module_id in $(seq 0 $(($no_of_gaudis-1))); do
       #grab one pcieid at a time (busID)
@@ -108,13 +132,59 @@ create_thread_list()
 
       #get the list of threads
       if [ $numa_node -ge 0 ]; then
+         # Read isolated cores and expand them
+         isolated_cores=$(expand_ranges "$(cat /sys/devices/system/cpu/isolated)")
+         if [[ -z "$isolated_cores" ]]; then
+            echo "If isolated_cores is empty, consider all cores as isolated. It will impact affinity level."
+         else
+            # Perform bitwise OR and reassign to AFFINITY_LEVEL
+            AFFINITY_LEVEL=$((AFFINITY_LEVEL | AFFINITY_ENUM[ISOLATION]))
+         fi
+
+         # Get physical cores (excluding hyperthreaded ones)
+         physical_cores=$(lscpu --parse=CORE,CPU,SOCKET,NODE | grep -v '^#' | awk -F',' '!seen[$1]++ {print $2}')
+
          vector=`lscpu --parse | grep ",$numa_node,,"|awk -F"," '{print $1}'`
-         echo $vector > $NUMA_MAPPING_DIR/.habana_moduleID$module_id
-         echo $vector >> $temp_dir/.module
+
+         AFFINITY_LEVEL=$((AFFINITY_LEVEL | AFFINITY_ENUM[NUMAS]))
+
+         # Filter NUMA node cores to keep only physical cores that are isolated
+         filtered_vector=$(for core in $vector; do
+            # Check if isolated_cores is empty
+            if [[ -z "$isolated_cores" ]]; then
+               # If isolated_cores is empty, consider all cores as isolated
+               if echo "$physical_cores" | grep -q "^$core$"; then
+                     echo "$core"
+               fi
+            else
+               # Proceed with normal filtering if isolated_cores is not empty
+               if echo "$isolated_cores" | grep -q "^$core$" && echo "$physical_cores" | grep -q "^$core$"; then
+                     echo "$core"
+               fi
+            fi
+         done)
+         AFFINITY_LEVEL=$((AFFINITY_LEVEL | AFFINITY_ENUM[PHYSICAL]))
+
+         # Convert filtered_vector into an array
+         filtered_array=($(echo "$filtered_vector"))
+
+         # Calculate the key_factor
+         num_cores=${#filtered_array[@]}
+         key_factor=$((num_cores / ((no_of_gaudis)/no_of_numa_nodes)))
+
+         # Calculate the core range for process_x
+         start_index=$(( ((module_id % ((no_of_gaudis)/no_of_numa_nodes)) - 1) * key_factor ))
+         end_index=$(( start_index + key_factor - 1 ))
+
+         # Extract cores for process_x
+         process_cores=("${filtered_array[@]:$start_index:$key_factor}")
+
+
+         echo ${process_cores[@]} > $NUMA_MAPPING_DIR/.habana_moduleID$module_id
+         echo ${process_cores[@]} >> $temp_dir/.module
       fi
    done
 }
-
 
 add_thread_list_to_config_table()
 {
@@ -142,6 +212,8 @@ main()
    add_thread_list_to_config_table
    clean_up
    affinity_print "Script finished successfully"
+   echo "AFFINITY_LEVEL exported with value: 0x$(printf "%x" "$AFFINITY_LEVEL")"
+   echo "0x$(printf "%x" "$AFFINITY_LEVEL")" > $file_final_class_output
    exit 0
 }
 

@@ -52,7 +52,7 @@ std::stringstream get_affinity_level()
 
     if (!fin.is_open())
     {
-        std::cout << RED << "Error: Unable to open file " << file_final_class_output.str() << RST << std::endl;
+        std::cout << RED << "Warning: Unable to open file " << file_final_class_output.str() << RST << std::endl;
         std::stringstream ss;
         ss << "No core affinity optimization level could be determined.";
         return ss;
@@ -269,14 +269,13 @@ static void createCSVReport(const EnvData& envData, const std::string& type, std
     fout.open(csvPath, std::ios::out | std::ios::app);
     for (int i = 0; i < count; i++)
     {
-        const std::string space_char = i % 32 == 0 && i != 0 ? "\n" : "\t";
-        if (isBfloat16)
+        if (isBfloat16(envData))
         {
-            fout << bf16ToFloat(data[i]) << space_char;
+            fout << bf16ToFloat(data[i]) << "\n";
         }
         else
         {
-            fout << data[i] << space_char;
+            fout << data[i] << "\n";
         }
     }
     fout.close();
