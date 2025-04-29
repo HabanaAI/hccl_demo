@@ -5,10 +5,9 @@
 
 #include "common.h"
 
-#include <algorithm>  // for std::for_each
-#include <chrono>     // for Bandwidth calculation
-#include <iostream>   // for io stream
-
+#include <algorithm>                                    // for std::for_each
+#include <chrono>                                       // for Bandwidth calculation
+#include <iostream>                                     // for io stream
 static constexpr float SCALE_VALIDATION_MARGIN = 0.05;  // fraction of expected BW
 
 enum class ControlType : uint8_t
@@ -57,7 +56,7 @@ static void getScaleupPairs(const EnvData& envData, std::vector<RanksPairSendRec
     }
 }
 
-static void getScaleoutPairs(const EnvData& envData, std::vector<RanksPairSendRecv>& ranksList)
+void getScaleoutPairs(const EnvData& envData, std::vector<RanksPairSendRecv>& ranksList)
 {
     for (HCL_Rank sender = 0; sender < envData.nranks; sender++)
     {
@@ -77,7 +76,7 @@ static void scaleValidationSend(const EnvData&         envData,
                                 uint64_t&              result)
 {
     // run single iteration as warmup
-    CHECK_HCCL_STATUS(hcclSend((void*) buffers.inputDevPtrs[0],
+    CHECK_HCCL_STATUS(hcclSend((void*)buffers.inputDevPtrs[0],
                                buffers.inputSize / getDataTypeSize(envData),
                                getDataType(envData),
                                receiver,
@@ -90,7 +89,7 @@ static void scaleValidationSend(const EnvData&         envData,
     for (size_t i = 0; i < envData.numIters; ++i)
     {
         uint64_t index = i % buffers.inputDevPtrs.size();
-        CHECK_HCCL_STATUS(hcclSend((void*) buffers.inputDevPtrs[index],
+        CHECK_HCCL_STATUS(hcclSend((void*)buffers.inputDevPtrs[index],
                                    buffers.inputSize / getDataTypeSize(envData),
                                    getDataType(envData),
                                    receiver,
@@ -113,7 +112,7 @@ static void scaleValidationReceive(const EnvData&         envData,
                                    const HCL_Rank         sender)
 {
     // run single iteration as warmup
-    CHECK_HCCL_STATUS(hcclRecv((void*) buffers.outputDevPtrs[0],
+    CHECK_HCCL_STATUS(hcclRecv((void*)buffers.outputDevPtrs[0],
                                buffers.inputSize / getDataTypeSize(envData),
                                getDataType(envData),
                                sender,
@@ -123,7 +122,7 @@ static void scaleValidationReceive(const EnvData&         envData,
     for (size_t i = 0; i < envData.numIters; ++i)
     {
         uint64_t index = i % buffers.inputDevPtrs.size();
-        CHECK_HCCL_STATUS(hcclRecv((void*) buffers.outputDevPtrs[index],
+        CHECK_HCCL_STATUS(hcclRecv((void*)buffers.outputDevPtrs[index],
                                    buffers.inputSize / getDataTypeSize(envData),
                                    getDataType(envData),
                                    sender,
@@ -139,7 +138,7 @@ static void scaleValidationEnd(const EnvData& envData)
         if (rank != envData.root)
         {
             ControlType control = ControlType::END;
-            CHECK_MPI_STATUS(MPI_Send((void*) &control, 1, MPI_UINT8_T, rank, 0, MPI_COMM_WORLD));
+            CHECK_MPI_STATUS(MPI_Send((void*)&control, 1, MPI_UINT8_T, rank, 0, MPI_COMM_WORLD));
         }
     }
 }
@@ -158,16 +157,16 @@ static bool scaleValidationServerStep(const EnvData&         envData,
     if (envData.rank != receiver)  // do server receive only after sending send request
     {
         control = ControlType::RECEIVE;
-        CHECK_MPI_STATUS(MPI_Send((void*) &control, 1, MPI_UINT8_T, receiver, 0, MPI_COMM_WORLD));
-        CHECK_MPI_STATUS(MPI_Send((void*) &sender, 1, MPI_INT, receiver, 0, MPI_COMM_WORLD));
+        CHECK_MPI_STATUS(MPI_Send((void*)&control, 1, MPI_UINT8_T, receiver, 0, MPI_COMM_WORLD));
+        CHECK_MPI_STATUS(MPI_Send((void*)&sender, 1, MPI_INT, receiver, 0, MPI_COMM_WORLD));
     }
 
     // trigger sender
     if (envData.rank != sender)  // server send at the result stage
     {
         control = ControlType::SEND;
-        CHECK_MPI_STATUS(MPI_Send((void*) &control, 1, MPI_UINT8_T, sender, 0, MPI_COMM_WORLD));
-        CHECK_MPI_STATUS(MPI_Send((void*) &receiver, 1, MPI_INT, sender, 0, MPI_COMM_WORLD));
+        CHECK_MPI_STATUS(MPI_Send((void*)&control, 1, MPI_UINT8_T, sender, 0, MPI_COMM_WORLD));
+        CHECK_MPI_STATUS(MPI_Send((void*)&receiver, 1, MPI_INT, sender, 0, MPI_COMM_WORLD));
     }
 
     // server receive
@@ -185,7 +184,7 @@ static bool scaleValidationServerStep(const EnvData&         envData,
     else
     {
         // wait for result
-        CHECK_MPI_STATUS(MPI_Recv((void*) &result, 1, MPI_UINT64_T, sender, 0, MPI_COMM_WORLD, &status))
+        CHECK_MPI_STATUS(MPI_Recv((void*)&result, 1, MPI_UINT64_T, sender, 0, MPI_COMM_WORLD, &status))
     }
 
     // log
@@ -206,7 +205,7 @@ static void scaleValidationClient(const EnvData& envData, const DeviceResources&
     {
         MPI_Status  status;
         ControlType control;
-        CHECK_MPI_STATUS(MPI_Recv((void*) &control, 1, MPI_UINT8_T, envData.root, 0, MPI_COMM_WORLD, &status))
+        CHECK_MPI_STATUS(MPI_Recv((void*)&control, 1, MPI_UINT8_T, envData.root, 0, MPI_COMM_WORLD, &status))
 
         switch (control)
         {
@@ -215,15 +214,15 @@ static void scaleValidationClient(const EnvData& envData, const DeviceResources&
             case ControlType::SEND:
                 uint64_t result;
                 int      receiver;
-                CHECK_MPI_STATUS(MPI_Recv((void*) &receiver, 1, MPI_INT, envData.root, 0, MPI_COMM_WORLD, &status))
+                CHECK_MPI_STATUS(MPI_Recv((void*)&receiver, 1, MPI_INT, envData.root, 0, MPI_COMM_WORLD, &status))
                 scaleValidationSend(envData, resources, buffers, receiver, result);
 
                 // send result to server
-                CHECK_MPI_STATUS(MPI_Send((void*) &result, 1, MPI_UINT64_T, envData.root, 0, MPI_COMM_WORLD));
+                CHECK_MPI_STATUS(MPI_Send((void*)&result, 1, MPI_UINT64_T, envData.root, 0, MPI_COMM_WORLD));
                 break;
             case ControlType::RECEIVE:
                 int sender;
-                CHECK_MPI_STATUS(MPI_Recv((void*) &sender, 1, MPI_INT, envData.root, 0, MPI_COMM_WORLD, &status))
+                CHECK_MPI_STATUS(MPI_Recv((void*)&sender, 1, MPI_INT, envData.root, 0, MPI_COMM_WORLD, &status))
                 scaleValidationReceive(envData, resources, buffers, sender);
                 break;
             default:
@@ -302,4 +301,4 @@ void scaleValidationTestDriver(EnvData&               envData,
     envData.shouldCheckCorrectness = false;
 }
 
-#endif  //MPI_ENABLED
+#endif  // MPI_ENABLED

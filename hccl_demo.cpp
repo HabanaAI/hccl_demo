@@ -870,6 +870,37 @@ static void printReport(const EnvData& envData, const std::vector<ReportEntry>& 
     log() << "Core affinity optimization result: " << '\n' << get_affinity_level().str() << std::endl;
 }
 
+#ifdef MPI_ENABLED
+static void connectivityCheck(EnvData& envData, const DeviceResources& resources)
+{
+    Buffers buffers;
+    prepareBuffers(envData, resources, sizeof(float), buffers);
+    Stats                          stats;
+    std::vector<RanksPairSendRecv> scaleoutPairsList;
+    getScaleoutPairs(envData, scaleoutPairsList);
+    bool is_ok = true;
+    for (const RanksPairSendRecv& pair : scaleoutPairsList)
+    {
+        envData.ranksList = "" + std::to_string(pair.sendFromRank) + "," + std::to_string(pair.recvInRank);
+        try
+        {
+            sendRecvTestDriver(envData, resources, buffers, static_cast<uint64_t>(sizeof(float)), stats);
+        }
+        catch (const std::exception& ex)
+        {
+            log() << "The pair: [" << pair.sendFromRank << "," << pair.recvInRank << "] failed on connectivity check."
+                  << std::endl;
+            is_ok = false;
+        }
+    }
+
+    if (!is_ok)
+    {
+        throw std::runtime_error {"Connectivity check for scale-validation test failed."};
+    }
+}
+#endif  // MPI_ENABLED
+
 template<class T>
 static void runTest(EnvData& envData, const DeviceResources& resources)
 {
@@ -895,6 +926,7 @@ static void runTest(EnvData& envData, const DeviceResources& resources)
         {
 #ifdef MPI_ENABLED
             // since there is no correctness check here the data can be random (no need to initialize)
+            connectivityCheck(envData, resources);
             scaleValidationTestDriver(envData, resources, buffers, static_cast<uint64_t>(size));
 #else
             throw std::runtime_error {"MPI must be enabled for scale validation test"};

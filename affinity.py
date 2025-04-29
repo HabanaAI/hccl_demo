@@ -34,7 +34,9 @@ class Affinity:
             # Make sure affinity script exists
             if not os.path.isfile(self.file_name):
                 # trying somewhere else
-                self.file_name   = '../gc_tools/hcl/list_affinity_topology_bare_metal_no_irq.sh'
+                if 'HCL_ROOT' in os.environ:
+                    hcl_root_path = os.getenv('HCL_ROOT')
+                    self.file_name   = os.path.join(hcl_root_path, 'scripts/affinity/common_list_affinity_topology.sh')
                 if not os.path.isfile(self.file_name):
                     self.print_affinity(f'Could not find {self.file_name}')
                     self.calculate_return_code(self.ERROR)

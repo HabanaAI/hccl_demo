@@ -295,4 +295,5 @@ void scaleValidationTestDriver(EnvData&               envData,
                                const DeviceResources& resources,
                                const Buffers&         buffers,
                                const uint64_t         size);
+void getScaleoutPairs(const EnvData& envData, std::vector<RanksPairSendRecv>& ranksList);
 #endif  // MPI_ENABLED
