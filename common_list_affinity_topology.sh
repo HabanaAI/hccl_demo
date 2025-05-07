@@ -187,15 +187,18 @@ create_thread_list()
       if [ $numa_node -ge 0 ]; then
          # Read isolated cores and expand them
          isolated_cores=$(expand_ranges "$($ISOLATED_CMD)")
-         if [[ -z "$isolated_cores" ]]; then
-            echo "If isolated_cores is empty, consider all cores as isolated. It will impact affinity level."
-         else
-            # Perform bitwise OR and reassign to AFFINITY_LEVEL
-            AFFINITY_LEVEL=$((AFFINITY_LEVEL | AFFINITY_ENUM[ISOLATION]))
-         fi
 
          # Get physical cores (excluding hyper-threaded ones)
          physical_cores=$($LSCPU_PARSE_EQ_CMD | grep -v '^#' | awk -F',' '!seen[$1]++ {print $2}')
+
+         # Get the allowed CPUs for the current process
+         allowed_cpus=$(taskset -cp $$ | awk -F': ' '{print $2}' | tr -d '\n')
+
+         # Create a set of allowed CPU IDs
+         allowed_cpu_ids=$(expand_ranges "$allowed_cpus")
+
+         # Filter physical_cores to only include allowed CPUs
+         allowed_physical_cores=$(echo "$physical_cores" | grep -xFf <(echo "$allowed_cpu_ids"))
 
          vector=`$LSCPU_PARSE_CMD | grep ",$numa_node,,"|awk -F"," '{print $1}'`
 
@@ -206,17 +209,29 @@ create_thread_list()
             # Check if isolated_cores is empty
             if [[ -z "$isolated_cores" ]]; then
                # If isolated_cores is empty, consider all cores as isolated
-               if echo "$physical_cores" | grep -q "^$core$"; then
+               if echo "$allowed_physical_cores" | grep -q "^$core$"; then
                      echo "$core"
                fi
             else
                # Proceed with normal filtering if isolated_cores is not empty
-               if echo "$isolated_cores" | grep -q "^$core$" && echo "$physical_cores" | grep -q "^$core$"; then
+               if echo "$isolated_cores" | grep -q "^$core$" && echo "$allowed_physical_cores" | grep -q "^$core$"; then
                      echo "$core"
                fi
             fi
          done)
          AFFINITY_LEVEL=$((AFFINITY_LEVEL | AFFINITY_ENUM[PHYSICAL]))
+
+         if [[ -z "$filtered_vector" ]]; then
+            echo "Consider all cores as isolated. It will impact affinity level."
+            filtered_vector=$allowed_physical_cores
+         else
+            if [[ -z "$isolated_cores" ]]; then
+               echo "If isolated_cores is empty, consider all cores as isolated. It will impact affinity level."
+            else
+               # Perform bitwise OR and reassign to AFFINITY_LEVEL
+               AFFINITY_LEVEL=$((AFFINITY_LEVEL | AFFINITY_ENUM[ISOLATION]))
+            fi
+         fi
 
          # Convert filtered_vector into an array
          filtered_array=($(echo "$filtered_vector"))
