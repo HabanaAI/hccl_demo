@@ -82,6 +82,7 @@ struct EnvData
     uint64_t              sizeInc;
     std::string           redop;
     size_t                numIters;
+    bool                  useSameBuffers;
     bool                  shouldCheckCorrectness;
     std::string           dataCSVPath;
     std::string           resultsCSVPath;

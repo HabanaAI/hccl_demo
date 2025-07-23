@@ -6,7 +6,7 @@ class Affinity:
     def __init__(self, mpi, user_cmd):
         self.user_cmd    = user_cmd
         self.mpi         = mpi
-        self.file_name   = 'common_list_affinity_topology.sh'
+        self.file_name   = os.path.dirname(os.path.abspath(__file__)) + '/common_list_affinity_topology.sh'
         self.default_dir = '/tmp/affinity_topology_output'
         self.SUCCESS     = 0
         self.ERROR       = 1
@@ -50,7 +50,7 @@ class Affinity:
             # Determine correct command line (MPI/pure mode)
             if self.mpi:
                 self.print_affinity('Running in MPI mode.')
-                cmd = f'{self.user_cmd} -x NUMA_MAPPING_DIR={output_path} {self.exe}'
+                cmd = f'{self.user_cmd} --pernode --bind-to none -x NUMA_MAPPING_DIR={output_path} {self.exe}'
             else:
                 self.print_affinity('Running in pure mode.')
                 cmd = f'MPI_ENABLED=0 NUMA_MAPPING_DIR={output_path} {self.exe}'

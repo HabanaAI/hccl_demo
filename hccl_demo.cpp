@@ -432,12 +432,19 @@ prepareBuffers(const EnvData& envData, const DeviceResources& resources, const u
 
     // Calculate number of buffers
     const uint64_t maxBufferSize   = std::max(buffers.inputSize, buffers.outputSize);
-    uint64_t       numberOfBuffers = 2;
-    if (maxBufferSize <= ALLOCATED_HBM_SIZE)
+    uint64_t       numberOfBuffers = 1;
+    if (!envData.useSameBuffers)
     {
-        numberOfBuffers = (ALLOCATED_HBM_SIZE / maxBufferSize) <= AMOUNT_JUMBO_BUFFERS
-                              ? AMOUNT_JUMBO_BUFFERS
-                              : ALLOCATED_HBM_SIZE / maxBufferSize;
+        if (maxBufferSize <= ALLOCATED_HBM_SIZE)
+        {
+            numberOfBuffers = (ALLOCATED_HBM_SIZE / maxBufferSize) <= AMOUNT_JUMBO_BUFFERS
+                                  ? AMOUNT_JUMBO_BUFFERS
+                                  : ALLOCATED_HBM_SIZE / maxBufferSize;
+        }
+        else  // use at least 2 buffers for performance
+        {
+            numberOfBuffers = 2;
+        }
     }
     numberOfBuffers = std::min(numberOfBuffers, MAX_BUFFER_COUNT);
 
@@ -638,7 +645,6 @@ describeStat(const EnvData& envData, const Buffers& buffers, const Stats& stats,
         log() << "[BENCHMARK]     NW Bandwidth   : " << formatBW(nwBW) << '\n';
         log() << "[BENCHMARK]     Algo Bandwidth : " << formatBW(algoBW);
         log() << '\n' << getPrintDelimiter(delimiterSize, '#') << '\n';
-        log() << "Core affinity optimization result: " << '\n' << get_affinity_level().str() << std::endl;
     }
 
     // Write results to csv file
@@ -867,7 +873,6 @@ static void printReport(const EnvData& envData, const std::vector<ReportEntry>& 
            << std::setw(columnWidth) << std::fixed << std::setprecision(6) << entry.avgBW / 1e9 << std::endl;
     }
     log() << ss.str();
-    log() << "Core affinity optimization result: " << '\n' << get_affinity_level().str() << std::endl;
 }
 
 #ifdef MPI_ENABLED
@@ -976,6 +981,11 @@ int main()
         // Init device
         DeviceResources resources;
         initDevice(envData, resources);
+
+        if (isRoot(envData))
+        {
+            log() << "Core affinity optimization result: " << '\n' << get_affinity_level().str() << std::endl;
+        }
 
         if (isBfloat16(envData))
         {

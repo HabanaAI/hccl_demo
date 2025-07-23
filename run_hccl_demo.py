@@ -32,6 +32,7 @@ import struct
 class DemoTest:
     def __init__(self):
         self.nranks                   = None
+        self.timeout                  = 0
         self.ranks_per_node           = None
         self.scaleup_group_size       = None
         self.node_id                  = None
@@ -51,6 +52,7 @@ class DemoTest:
         self.ignore_mpi_errors        = None
         self.no_color                 = None
         self.data_type                = None
+        self.same_buffers             = False
         self.no_correctness           = False
         self.reduction_op             = None
         self.scaleout_bw              = None
@@ -62,7 +64,7 @@ class DemoTest:
         self.SUCCESS                  = 0
         self.result_csv               = ""
         self.log_prefix               = "HCCL_demo_log_"
-        self.demo_exe                 = "./hccl_demo"
+        self.demo_exe                 = os.path.dirname(os.path.abspath(__file__)) + "/hccl_demo"
         self.test_list                = ['broadcast',
                                          'all_reduce',
                                          'reduce_scatter',
@@ -102,6 +104,8 @@ class DemoTest:
                             help="Clean previous artifacts including logs, recipe and csv results.")
         general_group.add_argument("-list", "--list_tests", action="store_true",
                             help="Display a list of available tests.")
+        general_group.add_argument("--timeout", type=int, default=0,
+                            help="Limit the time in minutes for the test to run. Default is 0 (no timeout).")
         general_group.add_argument("--doc", action="store_true",
                             help="Display detailed help for HCCL demo in a form of docstring.")
 
@@ -128,7 +132,7 @@ class DemoTest:
         test_group.add_argument("--size_range_inc", metavar="M", type=int,
                             help="Test will run on all multiplies by 2^size_range_inc from MIN to MAX.", default=1)
         test_group.add_argument("--loop", type=int,
-                            help="Number of loop iterations.", default=10)
+                            help="Number of loop iterations.", default=1000)
         test_group.add_argument("--test_root", type=int, default=0,
                             help="Index of root rank for broadcast and reduce tests (optional).")
         test_group.add_argument("--ranks_list", type=str, help="List of pairs of ranks for send_recv ranks scaleout. E.g. 0,8,1,8 (optional).")
@@ -136,6 +140,7 @@ class DemoTest:
                             help="Data type, float or bfloat16. Default is float.")
         test_group.add_argument("--custom_comm", type=str, default="",
                             help="List of HCCL process that will open a communicator.")
+        test_group.add_argument("--same_buffers", action="store_true", help="Allocate only a single buffer - 1 for input and 1 for output")
         test_group.add_argument("--no_correctness", action="store_true", help="Skip correctness validation.")
         test_group.add_argument("--reduction_op", type=str, help="<sum|min|max> (default=sum)", default="sum")
         test_group.add_argument("--scaleout_bw", type=str, help="Expected scaleout BW in units of G,M,K,B or no unit. Default is Bytes/sec")
@@ -282,6 +287,8 @@ class DemoTest:
             if self.data_csv != "":
                 cmd_args.append("HCCL_DEMO_DATA_CSV="      + str(self.data_csv))
 
+            if (self.same_buffers == True):
+                cmd_args.append("HCCL_DEMO_SAME_BUFFERS=1")
             if (self.no_correctness == True):
                 cmd_args.append("HCCL_DEMO_CHECK_CORRECTNESS=0")
 
@@ -358,58 +365,88 @@ class DemoTest:
            HCCL demo can be triggered in one of the following modes:
            1) Pure mode (default)
            2) MPI mode (triggered by adding -mpi)'''
+        timeout_mins = self.timeout  # 0 or negative means no timeout
         try:
             if self.mpi:
-                self.run_mpi_test()
+                self.run_mpi_test(timeout_mins)
             else:
-                self.run_test()
+                self.run_test(timeout_mins)
         except Exception as e:
             self.log_error(f'[run_demo] {e}' ,exception=True)
             raise Exception(e)
 
-    def run_test(self):
+    def run_test(self, timeout_mins = 0):
         '''The following method is used in order to run HCCL demo test in pure mode.
            HCCL demo will invoke as many processes as were requested by the user.'''
         try:
             self.log_info("HCCL demo test command line:", 'green')
             self.log_info('\n\n'.join(self.cmd_list))
+            if timeout_mins > 0:
+                self.log_info(f"Timeout is set to {timeout_mins} minutes", 'yellow')
+
             pool = Pool(processes=self.nranks)
-            results = pool.imap_unordered(self.run_process, self.cmd_list)
-            for res in results:
-                if res != 0:
-                    pool.close()
+            results = []
+
+            for cmd in self.cmd_list:
+                result = pool.apply_async(self.run_process, (cmd,))
+                results.append((cmd, result))   # Add tuple of command and async result
+
+            for cmd, result in results:
+                try:
+                    res = result.get( timeout = ( None if timeout_mins == 0 else timeout_mins*60) )
+                    if res != 0:
+                        self.log_error(f'[run_test] {cmd} ended with exit code {res}, will try kill worker pool', exception=False)
+                        raise Exception(f"Subprocess failed, cmd={cmd}, res={res}")
+                except TimeoutError as te:
+                    self.log_error(f'[run_test] Timeout occurred for {cmd}, will try to kill worker pool, te={str(te)}', exception=True)
                     pool.terminate()
                     pool.join()
-                    self.log_error(f'[run_test] One of the hccl_demo processes failed, terminating hccl demo')
-                    os.killpg(0, signal.SIGTERM)
-                    self.exit_demo()
+                    self.exit_demo(f'[run_test] Timeout occurred for {cmd}, terminating hccl demo, te={str(te)}, Processes: {str(self.cmd_list)}', exception=True)
                     break
+                except Exception as e:
+                    self.log_error(f'[run_test] Error for command: {cmd}, terminating hccl demo, e={str(e)}', exception=True)
+                    pool.terminate()
+                    pool.join()
+                    self.exit_demo(f'[run_test] Unexpected error for command: {cmd}, terminating hccl demo, e={str(e)}, Processes: {str(self.cmd_list)}', exception=True)
+                    break
+
+        except Exception as e:
+            self.log_error(f'[run_test] One of the hccl_demo processes failed, terminating hccl demo, e={str(e)}, Processes: {str(self.cmd_list)}', exception=True)
+            raise Exception(e)
+
+        finally:
             pool.close()
             pool.join()
 
-        except Exception as e:
-            self.log_error(f'[run_test] One of the hccl_demo processes failed, terminating hccl demo, {e}, Processes: {str(self.cmd_list)}', exception=True)
-            raise Exception(e)
-
-    def run_mpi_test(self):
+    def run_mpi_test(self, timeout_mins):
         '''# MPI helper method
-           The following method is used in order to run HCCL demo test using MPI.'''
+           The following method is used in order to run HCCL demo test using MPI.
+           timeout is the time in minutes to wait for the test to finish, or 0 for no timeout.'''
         mpi_cmd = self.cmd_list[0]
         mpi_cmd += " hccl_demo"
-        self.run_mpi_command(mpi_cmd)
+        self.run_mpi_command(mpi_cmd, timeout_mins)
 
-    def run_mpi_command(self, mpi_cmd):
+    def run_mpi_command(self, mpi_cmd, timeout_mins = 0):
         '''# MPI helper method
-           The following method is used in order to run MPI command.'''
+           The following method is used in order to run MPI command.
+           timeout is the time in minutes to wait for the test to finish, or 0 for no timeout.'''
         try:
             self.log_info(f"HCCL mpi command line:", 'green')
             self.log_info(mpi_cmd)
+            if timeout_mins > 0:
+                self.log_info(f"Timeout is set to {timeout_mins} minutes", 'yellow')
+
             process = subprocess.Popen(mpi_cmd, shell=True)
-            process.wait()
-            process.communicate()
+            process.wait(timeout = ( None if timeout_mins == 0 else timeout_mins*60))
+            process.communicate(timeout = ( None if timeout_mins == 0 else timeout_mins*60))
             return_code = process.poll()
             if return_code != 0:
                 self.exit_demo(f'[run_mpi_command] mpi command processes failed, terminating hccl demo. command: {mpi_cmd}')
+
+        except subprocess.TimeoutExpired as te:
+            self.log_error(f'[run_mpi_command] {te}, timed out on command: {mpi_cmd}', exception=True)
+            raise Exception(te)
+
         except Exception as e:
             self.log_error(f'[run_mpi_command] {e}, command: {mpi_cmd}', exception=True)
             raise Exception(e)
@@ -798,7 +835,8 @@ class DemoTest:
                 exit_code  = self.ERROR
                 exit_color = 'red'
             self.log_info(f'\nExiting HCCL demo with code: {str(exit_code)}', exit_color)
-            sys.exit(exit_code)
+            os.killpg(0, signal.SIGTERM)    # will cause parent and all child processes to terminate
+            sys.exit(exit_code) # This line will not be reached if os.killpg is successful
         except Exception as e:
             self.log_error(f'[exit_demo] {e}', exception=True)
 

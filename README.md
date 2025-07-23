@@ -150,6 +150,8 @@ This mode is supported with Verbs or EFA provider if the following conditions ar
     --clean, -clean          Clean previous artifacts including logs, recipe and csv results.
     -list, --list_tests      Display a list of available tests.
     --doc                    Display detailed help for HCCL demo in a form of docstring.
+    --timeout MINS           Timeout for test in minutes, default is no timeout
+
 ### Setup configuration flags
     --nranks NRANKS          Number of ranks in the communicator.
     --ranks_per_node RANKS_PER_NODE

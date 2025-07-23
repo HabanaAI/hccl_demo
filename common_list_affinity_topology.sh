@@ -214,6 +214,11 @@ create_thread_list()
                fi
             else
                # Proceed with normal filtering if isolated_cores is not empty
+               # Full box is a special case all cores are allowed.
+               if [ "$no_of_gaudis" -eq 8 ]; then
+                     allowed_physical_cores=$physical_cores
+               fi
+
                if echo "$isolated_cores" | grep -q "^$core$" && echo "$allowed_physical_cores" | grep -q "^$core$"; then
                      echo "$core"
                fi

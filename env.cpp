@@ -19,8 +19,9 @@ static constexpr uint64_t DEFAULT_TEST_SIZE_RANGE_MAX = 0;
 static constexpr uint64_t DEFAULT_TEST_SIZE_RANGE_INC = 1;
 
 static constexpr char   DEFAULT_REDOP[]           = "sum";
-static constexpr size_t DEFAULT_TEST_LOOP         = 10;
+static constexpr size_t DEFAULT_TEST_LOOP         = 1000;
 static constexpr bool   DEFAULT_CHECK_CORRECTNESS = true;
+static constexpr bool   DEFAULT_SAME_BUFFERS      = false;
 
 static constexpr size_t DEFAULT_BOX_SIZE = 8;
 static constexpr size_t DEFAULT_NRANKS   = 0;
@@ -82,6 +83,7 @@ EnvData getenvData()
 
     envData.redop                  = getEnvOrDefaultValue("HCCL_REDUCTION_OP", DEFAULT_REDOP);
     envData.numIters               = getEnvOrDefaultValue("HCCL_DEMO_TEST_LOOP", DEFAULT_TEST_LOOP);
+    envData.useSameBuffers         = getEnvOrDefaultValue("HCCL_DEMO_SAME_BUFFERS", DEFAULT_SAME_BUFFERS);
     envData.shouldCheckCorrectness = getEnvOrDefaultValue("HCCL_DEMO_CHECK_CORRECTNESS", DEFAULT_CHECK_CORRECTNESS);
     envData.dataCSVPath            = getEnvOrDefaultValue("HCCL_DEMO_DATA_CSV", "");
     envData.resultsCSVPath         = getEnvOrDefaultValue("HCCL_DEMO_RESULT_CSV", "");
