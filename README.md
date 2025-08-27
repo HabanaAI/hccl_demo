@@ -173,6 +173,8 @@ This mode is supported with Verbs or EFA provider if the following conditions ar
                              List of HCCL process that will open a communicator.
     --no_correctness         Skip correctness validation.
     --reduction_op           <sum|min|max> (default=sum)
+    --latency_benchmark      Enable latency benchmark mode (measures time per iteration).
+
 ### Logging flags
     --result_csv CSV_FILE      Path to a file for results output (optional).
     --ignore_mpi_errors, -ignore_mpi_errors
@@ -277,6 +279,14 @@ Output example:
     262144        65536         float         sum           <time>        <bandwidth>   <bandwidth>
     524288        131072        float         sum           <time>        <bandwidth>   <bandwidth>
     1048576       262144        float         sum           <time>        <bandwidth>   <bandwidth>
+
+### Running HCCL with latency benchmark on 1 server (8 Gaudi devices)
+
+Configuration: One server with 8 ranks, 32 MB size, all_reduce collective, 1000 iterations, latency benchmark mode
+
+    HCCL_COMM_ID=127.0.0.1:5555 python3 run_hccl_demo.py --nranks 8 --node_id 0 --size 32m --test all_reduce --loop 1000 --ranks_per_node 8 --latency_benchmark
+
+**Note**: When latency benchmark mode is enabled, the test measures latency per iteration instead of overall throughput. This is useful for measuring the communication latency of HCCL operations.
 
 ## Examples - MPI mode
 
