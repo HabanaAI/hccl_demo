@@ -280,6 +280,11 @@ double benchmark(const EnvData&                       envData,
                  const std::function<void(uint64_t)>& fn,
                  const std::function<void()>&         fnCorrectness);
 
+double benchmark_latency(const EnvData&                       envData,
+                        const DeviceResources&               resources,
+                        const std::function<void(uint64_t)>& fn,
+                        const std::function<void()>&         fnCorrectness);
+
 // demo environmental variables
 EnvData getenvData();
 
