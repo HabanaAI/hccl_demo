@@ -158,28 +158,65 @@ void sendRecvTestDefaultDriver(const EnvData&         envData,
         recvFromRank = sendToRank;
     }
 
-    stats.rankDurationInSec = benchmark(
-        envData,
-        resources,
-        [&](uint64_t iter) {
-            uint64_t index = iter % buffers.inputDevPtrs.size();
-            CHECK_HCCL_STATUS(sendRecvTest(envData,
-                                           resources,
-                                           recvFromRank,
-                                           sendToRank,
-                                           buffers.inputSize / getDataTypeSize(envData),
-                                           (const void*)buffers.inputDevPtrs[index],
-                                           (void*)buffers.outputDevPtrs[index]));
-        },
-        [&]() {
-            CHECK_HCCL_STATUS(sendRecvTest(envData,
-                                           resources,
-                                           recvFromRank,
-                                           sendToRank,
-                                           buffers.inputSize / getDataTypeSize(envData),
-                                           (const void*)buffers.inputDevPtrs[0],
-                                           (void*)buffers.correctnessDevPtr));
-        });
+    // Choose benchmark function based on latency benchmark setting
+    bool useLatencyBenchmark = false;
+    const char* latencyEnv = getenv("HCCL_DEMO_LATENCY_BENCHMARK");
+    if (latencyEnv && latencyEnv[0] == '1')
+    {
+        useLatencyBenchmark = true;
+    }
+
+    // Run send/recv with appropriate benchmark function
+    if (useLatencyBenchmark)
+    {
+        stats.rankDurationInSec = benchmark_latency(
+            envData,
+            resources,
+            [&](uint64_t iter) {
+                uint64_t index = iter % buffers.inputDevPtrs.size();
+                CHECK_HCCL_STATUS(sendRecvTest(envData,
+                                               resources,
+                                               recvFromRank,
+                                               sendToRank,
+                                               buffers.inputSize / getDataTypeSize(envData),
+                                               (const void*)buffers.inputDevPtrs[index],
+                                               (void*)buffers.outputDevPtrs[index]));
+            },
+            [&]() {
+                CHECK_HCCL_STATUS(sendRecvTest(envData,
+                                               resources,
+                                               recvFromRank,
+                                               sendToRank,
+                                               buffers.inputSize / getDataTypeSize(envData),
+                                               (const void*)buffers.inputDevPtrs[0],
+                                               (void*)buffers.correctnessDevPtr));
+            });
+    }
+    else
+    {
+        stats.rankDurationInSec = benchmark(
+            envData,
+            resources,
+            [&](uint64_t iter) {
+                uint64_t index = iter % buffers.inputDevPtrs.size();
+                CHECK_HCCL_STATUS(sendRecvTest(envData,
+                                               resources,
+                                               recvFromRank,
+                                               sendToRank,
+                                               buffers.inputSize / getDataTypeSize(envData),
+                                               (const void*)buffers.inputDevPtrs[index],
+                                               (void*)buffers.outputDevPtrs[index]));
+            },
+            [&]() {
+                CHECK_HCCL_STATUS(sendRecvTest(envData,
+                                               resources,
+                                               recvFromRank,
+                                               sendToRank,
+                                               buffers.inputSize / getDataTypeSize(envData),
+                                               (const void*)buffers.inputDevPtrs[0],
+                                               (void*)buffers.correctnessDevPtr));
+            });
+    }
 
     // Calculate expected results for correctness check
     if (envData.shouldCheckCorrectness)
@@ -253,30 +290,69 @@ void sendRecvRanksTestDriver(const EnvData&         envData,
         throw std::runtime_error {"Number of allocated receive buffers isn't sufficient to fulfill number of receives"};
     }
 
-    stats.rankDurationInSec = benchmark(
-        envData,
-        resources,
-        [&](uint64_t iter) {
-            uint64_t index = iter % buffers.inputDevPtrs.size();
-            CHECK_HCCL_STATUS(sendRecvRanksTest(iter,
-                                                envData,
-                                                resources,
-                                                recvFromRanks,
-                                                sendToRanks,
-                                                size / getDataTypeSize(envData),
-                                                (const void*)buffers.inputDevPtrs[index],
-                                                buffers.outputDevPtrs));
-        },
-        [&]() -> void {
-            CHECK_HCCL_STATUS(sendRecvRanksTest(0,
-                                                envData,
-                                                resources,
-                                                recvFromRanks,
-                                                sendToRanks,
-                                                size / getDataTypeSize(envData),
-                                                (const void*)buffers.inputDevPtrs[0],
-                                                buffers.outputDevPtrs));
-        });
+    // Choose benchmark function based on latency benchmark setting
+    bool useLatencyBenchmark = false;
+    const char* latencyEnv = getenv("HCCL_DEMO_LATENCY_BENCHMARK");
+    if (latencyEnv && latencyEnv[0] == '1')
+    {
+        useLatencyBenchmark = true;
+    }
+
+    // Run send/recv with appropriate benchmark function
+    if (useLatencyBenchmark)
+    {
+        stats.rankDurationInSec = benchmark_latency(
+            envData,
+            resources,
+            [&](uint64_t iter) {
+                uint64_t index = iter % buffers.inputDevPtrs.size();
+                CHECK_HCCL_STATUS(sendRecvRanksTest(iter,
+                                                    envData,
+                                                    resources,
+                                                    recvFromRanks,
+                                                    sendToRanks,
+                                                    size / getDataTypeSize(envData),
+                                                    (const void*)buffers.inputDevPtrs[index],
+                                                    buffers.outputDevPtrs));
+            },
+            [&]() -> void {
+                CHECK_HCCL_STATUS(sendRecvRanksTest(0,
+                                                    envData,
+                                                    resources,
+                                                    recvFromRanks,
+                                                    sendToRanks,
+                                                    size / getDataTypeSize(envData),
+                                                    (const void*)buffers.inputDevPtrs[0],
+                                                    buffers.outputDevPtrs));
+            });
+    }
+    else
+    {
+        stats.rankDurationInSec = benchmark(
+            envData,
+            resources,
+            [&](uint64_t iter) {
+                uint64_t index = iter % buffers.inputDevPtrs.size();
+                CHECK_HCCL_STATUS(sendRecvRanksTest(iter,
+                                                    envData,
+                                                    resources,
+                                                    recvFromRanks,
+                                                    sendToRanks,
+                                                    size / getDataTypeSize(envData),
+                                                    (const void*)buffers.inputDevPtrs[index],
+                                                    buffers.outputDevPtrs));
+            },
+            [&]() -> void {
+                CHECK_HCCL_STATUS(sendRecvRanksTest(0,
+                                                    envData,
+                                                    resources,
+                                                    recvFromRanks,
+                                                    sendToRanks,
+                                                    size / getDataTypeSize(envData),
+                                                    (const void*)buffers.inputDevPtrs[0],
+                                                    buffers.outputDevPtrs));
+            });
+    }
 
     if (recvFromRanks.size() > 0)
     {
