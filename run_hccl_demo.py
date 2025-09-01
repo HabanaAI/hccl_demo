@@ -56,6 +56,7 @@ class DemoTest:
         self.no_correctness           = False
         self.reduction_op             = None
         self.scaleout_bw              = None
+        self.latency_benchmark        = False
         self.default_affinity_dir     = '/tmp/affinity_topology_output'
         self.cmd_list                 = []
         self.log_level                = Logger.DEBUG
@@ -144,6 +145,7 @@ class DemoTest:
         test_group.add_argument("--no_correctness", action="store_true", help="Skip correctness validation.")
         test_group.add_argument("--reduction_op", type=str, help="<sum|min|max> (default=sum)", default="sum")
         test_group.add_argument("--scaleout_bw", type=str, help="Expected scaleout BW in units of G,M,K,B or no unit. Default is Bytes/sec")
+        test_group.add_argument("--latency_benchmark", action="store_true", help="Enable latency benchmark mode (measures latency per iteration instead of overall throughput)")
         # Logging flags
         log_group = parser.add_argument_group('Logging Options')
         log_group.add_argument("--result_csv", type=str, default="",
@@ -296,6 +298,9 @@ class DemoTest:
 
             if self.scaleout_bw:
                 cmd_args.append("HCCL_EXPECTED_SCALEOUT_BW=" + self.parse_size(self.scaleout_bw, is_memory_size=False))
+
+            if self.latency_benchmark:
+                cmd_args.append("HCCL_DEMO_LATENCY_BENCHMARK=1")
 
             cmd_args.append("HCCL_REDUCTION_OP=" + self.reduction_op)
 
