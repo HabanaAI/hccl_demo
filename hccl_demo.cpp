@@ -88,13 +88,61 @@ std::stringstream get_affinity_level()
 // Constants
 static constexpr size_t MAX_PRINTED_BUFFER_ELEMENTS = 4;
 
-double benchmark(const EnvData&                       envData,
-                 const DeviceResources&               resources,
-                 const std::function<void(uint64_t)>& fn,
-                 const std::function<void()>&         fnCorrectness)
+void measure_parallel(const EnvData&                       envData,
+                      const DeviceResources&               resources,
+                      const std::function<void(uint64_t)>& fn,
+                      Stats&                               stats)
 {
-    float rankDurationInSec;
+    auto startTime = std::chrono::high_resolution_clock::now();
 
+    for (size_t iter = 0; iter < envData.numIters; ++iter) 
+    {
+        fn(iter);
+    }
+
+    const auto duration = std::chrono::high_resolution_clock::now() - startTime;
+    // Measure only host time, device time is not measured in parallel mode
+    stats.hostDurationInSec = std::chrono::duration_cast<std::chrono::duration<double>>(duration).count() / envData.numIters;
+}
+
+void measure_serial(const EnvData&                       envData,
+                    const DeviceResources&               resources,
+                    const std::function<void(uint64_t)>& fn,
+                    Stats&                               stats)
+{
+    uint64_t devIterDurationInNano = 0;
+    uint64_t hostTotalTimeInSec = 0;
+    uint64_t devTotalTimeInSec = 0;
+
+    synEventHandle timeStart, timeStop;
+    CHECK_SYNAPSE_STATUS(synEventCreate(&timeStart, envData.rank, EVENT_COLLECT_TIME));
+    CHECK_SYNAPSE_STATUS(synEventCreate(&timeStop, envData.rank, EVENT_COLLECT_TIME));
+
+    for (size_t iter = 0; iter < envData.numIters; ++iter) {
+        auto startTime = std::chrono::high_resolution_clock::now();
+        CHECK_SYNAPSE_STATUS(synEventRecord(timeStart, resources.collectiveStream));
+
+        fn(iter);
+
+        CHECK_SYNAPSE_STATUS(synEventRecord(timeStop, resources.collectiveStream));
+        CHECK_SYNAPSE_STATUS(synEventSynchronize(timeStop));
+
+        const auto duration = std::chrono::high_resolution_clock::now() - startTime;
+        CHECK_SYNAPSE_STATUS(synEventElapsedTime(&devIterDurationInNano, timeStart, timeStop));
+
+        hostTotalTimeInSec += std::chrono::duration_cast<std::chrono::duration<double>>(duration).count();
+        devTotalTimeInSec += static_cast<double>(devIterDurationInNano) / 1e9;
+    }
+    stats.hostDurationInSec = hostTotalTimeInSec / envData.numIters;
+    stats.devDurationInSec = devTotalTimeInSec / envData.numIters;
+}
+
+void benchmark(const EnvData&                       envData,
+               const DeviceResources&               resources,
+               const std::function<void(uint64_t)>& fn,
+               const std::function<void()>&         fnCorrectness,
+               Stats&                               stats)
+{
     // Run warmup iterations to sync all the gaudis on the device.
     size_t iterations = 1;
     char   default_gdr_input[128];
@@ -111,23 +159,19 @@ double benchmark(const EnvData&                       envData,
     CHECK_SYNAPSE_STATUS(synStreamSynchronize(resources.collectiveStream));
 
     // Actual iterations
-    auto startTime = std::chrono::high_resolution_clock::now();
-
-    for (size_t iter = 1; iter < envData.numIters; ++iter)
+    if(envData.measureType == "bw")
     {
-        fn(iter);
+        measure_parallel(envData, resources, fn, stats);
+    }
+    else if(envData.measureType == "latency")
+    {
+        measure_serial(envData, resources, fn, stats);
     }
 
     // Correctness run on separate device output buffer
     fnCorrectness();
 
     CHECK_SYNAPSE_STATUS(synStreamSynchronize(resources.collectiveStream));
-
-    const auto duration = std::chrono::high_resolution_clock::now() - startTime;
-    rankDurationInSec   = std::chrono::duration_cast<std::chrono::duration<double>>(duration).count();
-    rankDurationInSec   = rankDurationInSec / envData.numIters;
-
-    return rankDurationInSec;
 }
 
 static void initMPI()
@@ -184,7 +228,6 @@ static HCL_Rank handleCustomComm(EnvData& envData, DeviceResources& resources)
 
 static void initDevice(EnvData& envData, DeviceResources& resources)
 {
-    HCL_Rank commRank = envData.rank;
     if (envData.customComm.size() == 0)
     {
         // Generate HCCL comm world
@@ -193,10 +236,11 @@ static void initDevice(EnvData& envData, DeviceResources& resources)
         {
             envData.customComm.push_back(i);
         }
+        resources.commRank = envData.rank;
     }
     else
     {
-        commRank = handleCustomComm(envData, resources);
+        resources.commRank = handleCustomComm(envData, resources);
     }
 
     // Initialize Synapse API context
@@ -230,7 +274,7 @@ static void initDevice(EnvData& envData, DeviceResources& resources)
 #endif  // MPI_ENABLED
 
     // Create new HCCL communicator
-    CHECK_HCCL_STATUS(hcclCommInitRank(&resources.comm, envData.nranks, uniqueID, commRank));
+    CHECK_HCCL_STATUS(hcclCommInitRank(&resources.comm, envData.nranks, uniqueID, resources.commRank));
 
     // Create Streams
     CHECK_SYNAPSE_STATUS(synStreamCreateGeneric(&resources.collectiveStream, resources.deviceHandle, 0));
@@ -296,7 +340,10 @@ static float calcExpectedReduction(std::vector<float>& args, hcclRedOp_t redop)
     }
 }
 
-static void getExpectedOutputs(const EnvData& envData, const Buffers& buffers, std::vector<float>& expectedOutputs)
+static void getExpectedOutputs(const EnvData&      envData,
+                               const Buffers&      buffers,
+                               std::vector<float>& expectedOutputs,
+                               HCL_Rank            commRank)
 {
     size_t   inputCount  = buffers.inputSize / getDataTypeSize(envData);
     size_t   outputCount = buffers.outputSize / getDataTypeSize(envData);
@@ -337,7 +384,7 @@ static void getExpectedOutputs(const EnvData& envData, const Buffers& buffers, s
             // 4  5  6  7
             // 8  9  10 11
             // 12 13 14 15
-            inputIdx = i + envData.rank * (inputCount / envData.nranks);
+            inputIdx = i + commRank * (inputCount / envData.nranks);
         }
         else if (envData.testType == "all_gather")
         {
@@ -369,7 +416,7 @@ static void getExpectedOutputs(const EnvData& envData, const Buffers& buffers, s
             // 12 14 16 18      6  10 14 18
             // 13 15 17 19      7  11 15 19
             inputRank = i / (inputCount / envData.nranks);
-            inputIdx  = i % (inputCount / envData.nranks) + envData.rank * (inputCount / envData.nranks);
+            inputIdx  = i % (inputCount / envData.nranks) + commRank * (inputCount / envData.nranks);
         }
         else if (envData.testType == "reduce")
         {
@@ -536,10 +583,10 @@ static bool compareBf16(EnvData envData, float expected, float outValue, int i)
 }
 
 template<class T>
-static bool checkCorrectness(const EnvData&         envData,
-                             const DeviceResources& resources,
-                             const Buffers&         buffers,
-                             std::vector<float>&    expectedOutputs)
+static bool checkCorrectness(const EnvData&            envData,
+                             const DeviceResources&    resources,
+                             const Buffers&            buffers,
+                             const std::vector<float>& expectedOutputs)
 {
     bool isOK = true;
 
@@ -616,24 +663,25 @@ static bool checkCorrectness(const EnvData&         envData,
 static void
 describeStat(const EnvData& envData, const Buffers& buffers, const Stats& stats, std::vector<ReportEntry>& reportVec)
 {
-    auto algoBW = (double)buffers.inputSize / stats.rankDurationInSec;
+    auto algoBW = (double)buffers.inputSize / stats.hostDurationInSec;
     auto nwBW   = algoBW * stats.factor;
+
+    // Sleep in order to describe stats after all correctness logs.
+    sleep(1);
 
     if (envData.sizeMax > envData.sizeMin)
     {
         log() << "Processing data_size " << buffers.inputSize << std::endl;
         ReportEntry report_entry = {buffers.inputSize,
                                     (uint64_t)(buffers.inputSize / getDataTypeSize(envData)),
-                                    stats.rankDurationInSec,
+                                    stats.hostDurationInSec,
+                                    stats.devDurationInSec,
                                     algoBW,
                                     nwBW};
         reportVec.push_back(report_entry);
     }
     else
     {
-        // Sleep in order to describe stats after all correctness logs.
-        sleep(1);
-
         std::string statHeadline = stats.statName + "(dataSize=" + std::to_string(buffers.inputSize) +
                                    ", count=" + std::to_string(buffers.inputSize / getDataTypeSize(envData)) +
                                    ", dtype=" + envData.dataType + ", iterations=" + std::to_string(envData.numIters) +
@@ -642,9 +690,19 @@ describeStat(const EnvData& envData, const Buffers& buffers, const Stats& stats,
 
         log() << getPrintDelimiter(delimiterSize, '#') << '\n';
         log() << "[BENCHMARK] " << statHeadline << '\n';
-        log() << "[BENCHMARK]     NW Bandwidth   : " << formatBW(nwBW) << '\n';
-        log() << "[BENCHMARK]     Algo Bandwidth : " << formatBW(algoBW);
-        log() << '\n' << getPrintDelimiter(delimiterSize, '#') << '\n';
+
+        if (envData.measureType == "bw")
+        {
+            log() << "[BENCHMARK]     NW Bandwidth   : " << formatBW(nwBW) << '\n';
+            log() << "[BENCHMARK]     Algo Bandwidth : " << formatBW(algoBW);
+            log() << '\n' << getPrintDelimiter(delimiterSize, '#') << '\n';
+        }
+        else if (envData.measureType == "latency")
+        {
+            log() << "[BENCHMARK]     Host Latency   : " << formatTime(stats.hostDurationInSec) << '\n';
+            log() << "[BENCHMARK]     Device Latency : " << formatTime(stats.devDurationInSec);
+            log() << '\n' << getPrintDelimiter(delimiterSize, '#') << '\n';
+        }
     }
 
     // Write results to csv file
@@ -653,8 +711,16 @@ describeStat(const EnvData& envData, const Buffers& buffers, const Stats& stats,
     {
         std::ofstream output;
         output.open(csvPath, std::ofstream::out | std::ofstream::app);
-        output << envData.testType << "," << envData.rank << "," << envData.dataType << "," << buffers.inputSize << ","
-               << envData.numIters << "," << formatBW(nwBW) << std::endl;
+        if (envData.measureType == "bw")
+        {
+            output << envData.testType << "," << envData.rank << "," << envData.dataType << "," << buffers.inputSize << ","
+                << envData.numIters << "," << formatBW(nwBW) << "," << formatBW(algoBW) << std::endl;
+        }
+        else if (envData.measureType == "latency")
+        {
+            output << envData.testType << "," << envData.rank << "," << envData.dataType << "," << buffers.inputSize << ","
+                << envData.numIters << "," << formatTime(stats.hostDurationInSec) << "," << formatTime(stats.devDurationInSec) << std::endl;
+        }
         output.close();
     }
 }
@@ -797,7 +863,7 @@ static void collectiveTestDriver(const EnvData&         envData,
     }
 
     // Run HCCL collective
-    stats.rankDurationInSec = benchmark(
+    benchmark(
         envData,
         resources,
         [&](uint64_t iter) {
@@ -814,11 +880,12 @@ static void collectiveTestDriver(const EnvData&         envData,
                        (const void*)buffers.inputDevPtrs[0],
                        (void*)buffers.correctnessDevPtr,
                        buffers.inputSize / getDataTypeSize(envData));
-        });
+        },
+        stats);
 
     if (envData.shouldCheckCorrectness)
     {
-        getExpectedOutputs(envData, buffers, stats.expectedOutputs);
+        getExpectedOutputs(envData, buffers, stats.expectedOutputs, resources.commRank);
     }
 
     if (isRoot(envData))
@@ -829,16 +896,40 @@ static void collectiveTestDriver(const EnvData&         envData,
 
 static void printReport(const EnvData& envData, const std::vector<ReportEntry>& reportVec)
 {
-    constexpr size_t columnWidth = 14;
+    constexpr size_t columnWidth = 18;
 
-    const static std::vector<std::string> header = {"size", "count", "type", "redop", "time", "algoBW", "nw_bw"};
-    const static std::vector<std::string> units  = {"(B)", "(elements)", "", "", "(ms)", "(GB/s)", "(GB/s)"};
+    std::vector<std::string> header = {"size", "count", "type", "redop"};
+    std::vector<std::string> units  = {"(B)", "(elements)", "", ""};
 
-    std::stringstream ss;
-    const std::string summary = "[SUMMARY REPORT]";
+    std::string summary;
+    if (envData.measureType == "bw")
+    {
+        summary = "[BANDWIDTH SUMMARY REPORT]";
+
+        header.push_back("time");
+        header.push_back("algoBW");
+        header.push_back("nw_bw");
+
+        units.push_back("(ms)");
+        units.push_back("(GB/s)");
+        units.push_back("(GB/s)");
+    }
+    else if (envData.measureType == "latency")
+    {
+        summary = "[LATENCY SUMMARY REPORT]";
+
+        header.push_back("Host Latency");
+        header.push_back("Device Latency");
+
+        units.push_back("(ms)");
+        units.push_back("(ms)");
+    }
+
     const std::string statName =
         "(src!=dst, collective=" + envData.testType + ", iterations=" + std::to_string(envData.numIters) + ")";
     size_t delimiterSize = statName.length() + 1;
+
+    std::stringstream ss;
     ss << '\n' << getPrintDelimiter(delimiterSize, '#') << std::endl;
     ss << summary << '\n' << statName << '\n' << std::endl;
     ss << std::left;
@@ -868,9 +959,19 @@ static void printReport(const EnvData& envData, const std::vector<ReportEntry>& 
         {
             ss << std::setw(columnWidth) << envData.redop;
         }
-        ss << std::setw(columnWidth) << std::fixed << std::setprecision(3) << entry.time * 1000
-           << std::setw(columnWidth) << std::fixed << std::setprecision(6) << entry.algoBW / 1e9
-           << std::setw(columnWidth) << std::fixed << std::setprecision(6) << entry.avgBW / 1e9 << std::endl;
+        if (envData.measureType == "bw")
+        {
+            ss << std::setw(columnWidth) << std::fixed << std::setprecision(3) << formatTime(entry.hostTime)
+               << std::setw(columnWidth) << std::fixed << std::setprecision(6) << formatBW(entry.algoBW)
+               << std::setw(columnWidth) << std::fixed << std::setprecision(6) << formatBW(entry.avgBW) 
+               << std::endl;
+        }
+        else if (envData.measureType == "latency")
+        {
+            ss << std::setw(columnWidth) << std::fixed << std::setprecision(3) << formatTime(entry.hostTime)
+               << std::setw(columnWidth) << std::fixed << std::setprecision(3) << formatTime(entry.deviceTime) 
+               << std::endl;
+        }
     }
     log() << ss.str();
 }

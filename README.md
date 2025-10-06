@@ -161,6 +161,7 @@ This mode is supported with Verbs or EFA provider if the following conditions ar
     --mpi, -mpi              Use MPI for managing execution.
 ### Test control flags
     --test TEST              Specify test (use '-l' option for test list).
+    --measure MEASURE        <bw|latency> (default=bw).
     --size N                 Data size in units of G,M,K,B or no unit. Default is Bytes.
     --size_range MIN MAX     Test will run from MIN to MAX, units of G,M,K,B or no unit. Default is Bytes. E.g. --size_range 32B 1M.
     --size_range_inc M       Test will run on all multiplies by 2^size_range_inc from MIN to MAX.

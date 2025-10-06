@@ -9,9 +9,10 @@
 #include <unistd.h>   // for linux specifics (getenv)
 
 // Constants
-static constexpr HCL_Rank DEFAULT_ROOT_RANK   = 0;
-static constexpr char     DEFAULT_TEST_TYPE[] = "broadcast";
-static constexpr char     DEFAULT_DATA_TYPE[] = "float";
+static constexpr HCL_Rank DEFAULT_ROOT_RANK      = 0;
+static constexpr char     DEFAULT_TEST_TYPE[]    = "broadcast";
+static constexpr char     DEFAULT_MEASURE_TYPE[] = "bw";
+static constexpr char     DEFAULT_DATA_TYPE[]    = "float";
 
 static constexpr uint64_t DEFAULT_TEST_SIZE           = 33554432;
 static constexpr uint64_t DEFAULT_TEST_SIZE_RANGE_MIN = 0;
@@ -34,7 +35,7 @@ static std::string getEnvOrDefaultValue(const char* envName, std::string default
 
 static uint64_t getEnvOrDefaultValue(const char* envName, uint64_t defaultValue)
 {
-    char* envValue = getenv(envName);
+    const char* envValue = getenv(envName);
     return (envValue != nullptr) ? strtoull(envValue, NULL, 0) : defaultValue;
 }
 
@@ -70,9 +71,10 @@ static void parseCustomComm(std::string rankList, std::vector<HCL_Rank>& parsedR
 EnvData getenvData()
 {
     EnvData envData;
-    envData.root     = getEnvOrDefaultValue("HCCL_DEMO_TEST_ROOT", DEFAULT_ROOT_RANK);
-    envData.testType = getEnvOrDefaultValue("HCCL_DEMO_TEST", DEFAULT_TEST_TYPE);
-    envData.dataType = getEnvOrDefaultValue("HCCL_DATA_TYPE", DEFAULT_DATA_TYPE);
+    envData.root        = getEnvOrDefaultValue("HCCL_DEMO_TEST_ROOT", DEFAULT_ROOT_RANK);
+    envData.testType    = getEnvOrDefaultValue("HCCL_DEMO_TEST", DEFAULT_TEST_TYPE);
+    envData.measureType = getEnvOrDefaultValue("HCCL_DEMO_MEASURE", DEFAULT_MEASURE_TYPE);
+    envData.dataType    = getEnvOrDefaultValue("HCCL_DATA_TYPE", DEFAULT_DATA_TYPE);
 
     uint64_t size    = getEnvOrDefaultValue("HCCL_DEMO_TEST_SIZE", DEFAULT_TEST_SIZE);
     uint64_t sizeMin = getEnvOrDefaultValue("HCCL_SIZE_RANGE_MIN", DEFAULT_TEST_SIZE_RANGE_MIN);

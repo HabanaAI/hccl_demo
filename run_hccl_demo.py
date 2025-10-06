@@ -37,6 +37,7 @@ class DemoTest:
         self.scaleup_group_size       = None
         self.node_id                  = None
         self.test                     = None
+        self.measure                  = None
         self.size                     = None
         self.size_range               = None
         self.size_range_inc           = None
@@ -125,6 +126,7 @@ class DemoTest:
         test_group = parser.add_argument_group('Test Control Options')
         test_group.add_argument("--test", type=str,
                             help="Specify test (use '-l' option for test list).", default="broadcast")
+        test_group.add_argument("--measure", type=str, help="<bw|latency> (default=bw)", default="bw")
         test_group.add_argument("--size", metavar="N", type=str,
                             help="Data size in units of G,M,K,B or no unit. Default is Bytes.", default=33554432)
         test_group.add_argument("--size_range", type=str, nargs=2, metavar=("MIN","MAX"),
@@ -158,7 +160,17 @@ class DemoTest:
         self.create_logger()
 
         args, self.mpi_args = parser.parse_known_args()
-
+ 
+        # If NUMA_MAPPING_DIR is specified in the command line, set is as an environment variable from here
+        # Without this, the default value is chosen instead of the value specified in command line!
+        for arg in self.mpi_args:
+            if arg.startswith('NUMA_MAPPING_DIR='):
+                numa_mapping_dir_value = arg.split('=', 1)[1]
+                if numa_mapping_dir_value:
+                    os.environ['NUMA_MAPPING_DIR'] = numa_mapping_dir_value
+                    print(f"NUMA_MAPPING_DIR = {os.getenv('NUMA_MAPPING_DIR')}")
+                else:
+                    print("Warning: NUMA_MAPPING_DIR specified without a value. The environment variable will not be set.")
         self.check_color(args)
 
         self.print_header()
@@ -277,6 +289,7 @@ class DemoTest:
             cmd_args = []
             numa_output_path = os.getenv('NUMA_MAPPING_DIR', self.default_affinity_dir)
             cmd_args.append("HCCL_DEMO_TEST="          + str(self.test))
+            cmd_args.append("HCCL_DEMO_MEASURE="       + str(self.measure))
             cmd_args.append("HCCL_DATA_TYPE="          + str(self.data_type))
             if self.size_range:
                 cmd_args.append("HCCL_SIZE_RANGE_MIN=" + str(self.size_range[0]))
@@ -360,6 +373,11 @@ class DemoTest:
             self.log_error(f'[set_env] {e}' ,exception=True)
             raise Exception(e)
 
+    def kill_all_subprocesses(self):
+        parent = psutil.Process(os.getpid())
+        for child in parent.children(recursive=True):
+            child.kill()
+
     def run_demo(self):
         '''The following method is used in order to trigger HCCL demo run.
            HCCL demo can be triggered in one of the following modes:
@@ -409,9 +427,13 @@ class DemoTest:
                     pool.join()
                     self.exit_demo(f'[run_test] Unexpected error for command: {cmd}, terminating hccl demo, e={str(e)}, Processes: {str(self.cmd_list)}', exception=True)
                     break
+        except KeyboardInterrupt:
+            print(f"KeyboardInterrupt was received.")
+            self.kill_all_subprocesses()
 
         except Exception as e:
             self.log_error(f'[run_test] One of the hccl_demo processes failed, terminating hccl demo, e={str(e)}, Processes: {str(self.cmd_list)}', exception=True)
+            self.kill_all_subprocesses()
             raise Exception(e)
 
         finally:
@@ -445,7 +467,7 @@ class DemoTest:
 
         except subprocess.TimeoutExpired as te:
             self.log_error(f'[run_mpi_command] {te}, timed out on command: {mpi_cmd}', exception=True)
-            raise Exception(te)
+            self.exit_demo(f'[run_mpi_command] mpi timeout, killing all children hccl demo. command: {mpi_cmd}', exception=True, kill_children=True)
 
         except Exception as e:
             self.log_error(f'[run_mpi_command] {e}, command: {mpi_cmd}', exception=True)
@@ -460,6 +482,7 @@ class DemoTest:
             return out.decode('utf-8').splitlines()
         except Exception as e:
             self.log_error(f'[run_command] {e}' ,exception=True)
+            self.kill_all_subprocesses()
             raise Exception(e)
 
     def run_process(self, process):
@@ -821,7 +844,7 @@ class DemoTest:
         except Exception as e:
             self.log_error(f'[clean_artifacts] {e}' ,exception=True)
 
-    def exit_demo(self, error_msg="", exception=False):
+    def exit_demo(self, error_msg="", exception=False, kill_children=False):
         '''The following method is used in order to terminate HCCL demo test in case of
            an error on exception and display the relevant information about the termination.'''
         try:
@@ -835,7 +858,8 @@ class DemoTest:
                 exit_code  = self.ERROR
                 exit_color = 'red'
             self.log_info(f'\nExiting HCCL demo with code: {str(exit_code)}', exit_color)
-            os.killpg(0, signal.SIGTERM)    # will cause parent and all child processes to terminate
+            if kill_children:
+                os.killpg(0, signal.SIGTERM)    # will cause parent and all child processes to terminate
             sys.exit(exit_code) # This line will not be reached if os.killpg is successful
         except Exception as e:
             self.log_error(f'[exit_demo] {e}', exception=True)

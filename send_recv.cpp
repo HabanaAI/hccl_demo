@@ -158,7 +158,7 @@ void sendRecvTestDefaultDriver(const EnvData&         envData,
         recvFromRank = sendToRank;
     }
 
-    stats.rankDurationInSec = benchmark(
+    benchmark(
         envData,
         resources,
         [&](uint64_t iter) {
@@ -179,7 +179,8 @@ void sendRecvTestDefaultDriver(const EnvData&         envData,
                                            buffers.inputSize / getDataTypeSize(envData),
                                            (const void*)buffers.inputDevPtrs[0],
                                            (void*)buffers.correctnessDevPtr));
-        });
+        },
+        stats);
 
     // Calculate expected results for correctness check
     if (envData.shouldCheckCorrectness)
@@ -253,7 +254,7 @@ void sendRecvRanksTestDriver(const EnvData&         envData,
         throw std::runtime_error {"Number of allocated receive buffers isn't sufficient to fulfill number of receives"};
     }
 
-    stats.rankDurationInSec = benchmark(
+    benchmark(
         envData,
         resources,
         [&](uint64_t iter) {
@@ -276,7 +277,8 @@ void sendRecvRanksTestDriver(const EnvData&         envData,
                                                 size / getDataTypeSize(envData),
                                                 (const void*)buffers.inputDevPtrs[0],
                                                 buffers.outputDevPtrs));
-        });
+        },
+        stats);
 
     if (recvFromRanks.size() > 0)
     {

@@ -76,6 +76,7 @@ struct EnvData
 {
     HCL_Rank              root;
     std::string           testType;
+    std::string           measureType;
     std::string           dataType;
     uint64_t              sizeMin;
     uint64_t              sizeMax;
@@ -100,6 +101,7 @@ struct DeviceResources
     synDeviceId     deviceHandle;
     hcclComm_t      comm;
     HCL_Rank        commRoot;
+    HCL_Rank        commRank;
     synStreamHandle collectiveStream;
     synStreamHandle deviceToHostStream;
     synStreamHandle hostToDeviceStream;
@@ -119,7 +121,8 @@ struct Stats
     bool               isDescribing = false;
     std::string        statName;
     double             factor;
-    double             rankDurationInSec;
+    double             hostDurationInSec;
+    double             devDurationInSec;
     std::vector<float> expectedOutputs;
 };
 
@@ -127,7 +130,8 @@ struct ReportEntry
 {
     uint64_t size;
     uint64_t count;
-    double   time;
+    double   hostTime;
+    double   deviceTime;
     double   algoBW;
     double   avgBW;
 };
@@ -241,6 +245,13 @@ inline std::string formatBW(const double bytesPerSec)
     return ss.str();
 }
 
+inline std::string formatTime(const double timeInSec)
+{
+    std::stringstream ss;
+    ss << std::fixed << std::setprecision(6) << timeInSec * 1e3 << " ms";
+    return ss.str();
+}
+
 inline std::string getPrintDelimiter(size_t length, char delimiter)
 {
     std::stringstream ss;
@@ -275,10 +286,11 @@ inline float getInput(const HCL_Rank rank, const size_t nranks, const uint64_t i
 }
 
 // demo infrastructure functions
-double benchmark(const EnvData&                       envData,
-                 const DeviceResources&               resources,
-                 const std::function<void(uint64_t)>& fn,
-                 const std::function<void()>&         fnCorrectness);
+void benchmark(const EnvData&                       envData,
+               const DeviceResources&               resources,
+               const std::function<void(uint64_t)>& fn,
+               const std::function<void()>&         fnCorrectness,
+               Stats&                               stats);
 
 // demo environmental variables
 EnvData getenvData();
