@@ -100,6 +100,8 @@ void measure_parallel(const EnvData&                       envData,
         fn(iter);
     }
 
+    CHECK_SYNAPSE_STATUS(synStreamSynchronize(resources.collectiveStream));
+
     const auto duration = std::chrono::high_resolution_clock::now() - startTime;
     // Measure only host time, device time is not measured in parallel mode
     stats.hostDurationInSec = std::chrono::duration_cast<std::chrono::duration<double>>(duration).count() / envData.numIters;
@@ -111,8 +113,8 @@ void measure_serial(const EnvData&                       envData,
                     Stats&                               stats)
 {
     uint64_t devIterDurationInNano = 0;
-    uint64_t hostTotalTimeInSec = 0;
-    uint64_t devTotalTimeInSec = 0;
+    double hostTotalTimeInSec = 0;
+    double devTotalTimeInSec = 0;
 
     synEventHandle timeStart, timeStop;
     CHECK_SYNAPSE_STATUS(synEventCreate(&timeStart, envData.rank, EVENT_COLLECT_TIME));
@@ -133,6 +135,7 @@ void measure_serial(const EnvData&                       envData,
         hostTotalTimeInSec += std::chrono::duration_cast<std::chrono::duration<double>>(duration).count();
         devTotalTimeInSec += static_cast<double>(devIterDurationInNano) / 1e9;
     }
+
     stats.hostDurationInSec = hostTotalTimeInSec / envData.numIters;
     stats.devDurationInSec = devTotalTimeInSec / envData.numIters;
 }
